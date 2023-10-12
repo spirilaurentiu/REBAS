@@ -237,7 +237,7 @@ class bernoulli:
 	# Draw from a truncated Gaussian distribution
 	def randomTrunc(self):
 		"""
-		Generate random numbers
+		Generate random numbers from a trunccated distribution
 		"""
 
 		for i in range(100):

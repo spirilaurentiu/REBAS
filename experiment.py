@@ -16,8 +16,8 @@ if 1:
         parser = argparse.ArgumentParser()
         parser.add_argument('--nofExperiments', default=1, type=int,
                 help='# of experiments.')
-        parser.add_argument('--nofWorlds', default=1, type=int,
-                help='# of worlds per replica.')
+        parser.add_argument('--worlds', default = [0], nargs='+',
+                help='Worlds to be run.')
         parser.add_argument('--sampleSize', default=10, type=int,
                 help='# of samples in an experiment.')
         
@@ -93,8 +93,6 @@ def runNonequiliriumWorlds(x0, s_X, targetPDistrib, qDistrib, MC = False):
 
         xtau, Jacob, (s_X_dual) = propose.f_mul(x0, (s_X))
 
-        #xtau *= sgn
-
         xtau = p_C._mean_ + (1.0 * (x0 - p_C._mean_) * s_X)
 
         # Acception rejection if requested
@@ -128,9 +126,10 @@ sampleSize = args.sampleSize
 # Initial conditions
 x0, y0 = 4.0, 4.0
 xn, yn = np.NaN, np.NaN
-xmc, ymc = np.NaN, np.NaN
-exchanges = 0.0
+xtau, ytau = np.NaN, np.NaN
 s_X, s_X_1, s_Y, s_Y_1 = np.nan, np.nan, np.nan, np.nan
+Jacob_C, Jacob_H = np.nan, np.nan
+exchanges = 0.0
 
 # Choose target distributions
 p_C = distribs.gauss()
@@ -179,12 +178,14 @@ elif distribOpt == "gauss":
         q_H.setLimits(0.5, 2.0)
 
 # Nof worlds
-nofWorlds = args.nofWorlds
-worlds = np.arange(0, nofWorlds)
+worlds = [int(worlds) for worlds in args.worlds]
+nofWorlds = len(worlds)
+print("Got", nofWorlds, "worlds:", worlds, file = sys.stderr)
+
 
 # Gather results
-sample_x = np.full((sampleSize * (nofWorlds - 1)), np.nan, dtype = float) 
-sample_y = np.full((sampleSize * (nofWorlds - 1)), np.nan, dtype = float)
+sample_x = np.full((sampleSize * (1)), np.nan, dtype = float) 
+sample_y = np.full((sampleSize * (1)), np.nan, dtype = float)
 
 runNonequilibriumWorlds_Opt = True
 runEquilibriumWorlds_Opt = True
@@ -200,85 +201,92 @@ for mixi in range(sampleSize):
         # ---------------------------------------------------------------------
                 
         # Run equilibrium worlds
-        x_set, J, (pert_X_dual)  = runEquiliriumWorlds(x0, p_C, MC = True)
-        
-        # Record acceptance
-        if(x_set != x0): acceptance[0, 0] += 1.0
+        if 0 in worlds:
+                x_set, J, (pert_X_dual)  = runEquiliriumWorlds(x0, p_C, MC = True)
+                
+                # Record acceptance
+                if(x_set != x0): acceptance[0, 0] += 1.0
 
-        # Reset
-        x0 = x_set      
+                # Reset
+                x0 = x_set      
 
         # --------------------------------
 
-        # Get a scaling factor
-        s_X    = updWorldsNonequilibriumParameters(q_C)
-        #s_X *= distribs.randomSign()
-        s_X_1 = 1.0 / s_X
+        # Run non-equilibrium worlds
+        if 1 in worlds:
 
-        # Propose
-        xtau, Jacob_C, (s_X_dual)  = runNonequiliriumWorlds(x0, s_X, p_C, q_C,
-                                        MC = args.MC)
-        assert(s_X_1 == s_X_dual) 
+                # Get a scaling factor
+                s_X    = updWorldsNonequilibriumParameters(q_C)
+                #s_X *= distribs.randomSign()
+                s_X_1 = 1.0 / s_X
+
+                # Propose
+                xtau, Jacob_C, (s_X_dual)  = runNonequiliriumWorlds(x0, s_X, p_C, q_C,
+                                                MC = args.MC)
+                assert(s_X_1 == s_X_dual)
+
+        else:
+                xtau = x0
 
         # =====================================================================
         # ------------------------------ REPLICA H ----------------------------
         # ---------------------------------------------------------------------
 
         # Run equilibrium worlds
-        y_set, J, (pert_Y_dual)  = runEquiliriumWorlds(y0, p_H, MC = True)
+        if 0 in worlds:
+                y_set, J, (pert_Y_dual)  = runEquiliriumWorlds(y0, p_H, MC = True)
 
-        # Record acceptance
-        if(y_set != y0): acceptance[1, 0] += 1.0
+                # Record acceptance
+                if(y_set != y0): acceptance[1, 0] += 1.0
 
-        # Reset
-        y0 = y_set
+                # Reset
+                y0 = y_set
                 
         # --------------------------------
 
-        # Get a scaling factor
-        s_Y    = updWorldsNonequilibriumParameters(q_H)
-        #s_Y *= distribs.randomSign()
-        s_Y_1 = 1.0 / s_Y
-        
-        # Propose
-        ytau, Jacob_H, (s_Y_dual)  = runNonequiliriumWorlds(y0, s_Y, p_H, q_H,
-                                        MC = args.MC)
+        # Run non-equilibrium worlds
+        if 1 in worlds:
 
-        assert(s_Y_1 == s_Y_dual)
+                # Get a scaling factor
+                s_Y    = updWorldsNonequilibriumParameters(q_H)
+                #s_Y *= distribs.randomSign()
+                s_Y_1 = 1.0 / s_Y
+                
+                # Propose
+                ytau, Jacob_H, (s_Y_dual)  = runNonequiliriumWorlds(y0, s_Y, p_H, q_H,
+                                                MC = args.MC)
 
-        # ================================
+                assert(s_Y_1 == s_Y_dual)
+
+        else:
+                ytau = y0
+
+        # =====================================================================
+        # ------------------------------ attemptREX ---------------------------
+        # ---------------------------------------------------------------------
+
+        xn, yn   = x0, y0
 
         # Initial target probabilities (eii, ejj, eij, eji)
-        pC_x0   = p_C.PDF(x0)
-        pH_y0   = p_H.PDF(y0)
-        pH_x0   = p_H.PDF(x0)
-        pC_y0   = p_C.PDF(y0)
+        pC_x0, pH_y0   = p_C.PDF(x0), p_H.PDF(y0)
+        pH_x0, pC_y0   = p_H.PDF(x0), p_C.PDF(y0)
 
         # Last target probabilities (lii, ljj, lij, lji)
-        pC_xtau = p_C.PDF(xtau)
-        pH_ytau = p_H.PDF(ytau)
-        pH_xtau = p_H.PDF(xtau)
-        pC_ytau = p_C.PDF(ytau)
+        pC_xtau, pH_ytau = p_C.PDF(xtau), p_H.PDF(ytau)
+        pH_xtau, pC_ytau = p_H.PDF(xtau), p_C.PDF(ytau)
 
         # Correction term
-        qC_s_X   = q_C.PDFTrunc(s_X)
-        qC_s_X_1 = q_C.PDFTrunc(s_X_1)
-        qH_s_Y   = q_H.PDFTrunc(s_Y)
-        qH_s_Y_1 = q_H.PDFTrunc(s_Y_1)
-
-        qH_s_X_1 = q_H.PDFTrunc(s_X_1)
-        qC_s_Y_1 = q_C.PDFTrunc(s_Y_1)
-
         correctionTerm = 0.0
+        qC_s_X,   qH_s_Y   = q_C.PDFTrunc(s_X),   q_H.PDFTrunc(s_Y)
+        qH_s_X_1, qC_s_Y_1 = q_H.PDFTrunc(s_X_1), q_C.PDFTrunc(s_Y_1)
+
         if (qC_s_X * qH_s_Y) != 0.0:
                 correctionTerm = (qH_s_X_1 * qC_s_Y_1) / (qC_s_X * qH_s_Y)
 
         # Overall division by 0 avoidance
         Denominator = (pC_x0 * Jacob_C) * (pH_y0 * Jacob_H) * (qC_s_X * qH_s_Y)
 
-        # Metropolis-Hastings acc-rej step
-        xn, yn   = np.NaN, np.NaN
-        xmc, ymc = np.NaN, np.NaN
+
 
         if args.RE == True: # Exchange
 
@@ -304,8 +312,11 @@ for mixi in range(sampleSize):
                 log_p_accept = WTerm + np.log(correctionTerm)
 
                 if( (log_p_accept >= 0.0) or (unifSample < np.exp(log_p_accept))):
+
                         xn, yn = ytau, xtau
+                        
                         exchanges += 1
+
                 else:
                         xn, yn = x0, y0
 
