@@ -6,6 +6,9 @@ import matplotlib
 import matplotlib.pyplot as plt
 matplotlib.use('Agg')
 
+# -----------------------------------------------------------------------------
+#                      Robosample output reader
+#region REXData ---------------------------------------------------------------
 class REXData:
     def __init__(self, inFN):
 
@@ -45,6 +48,73 @@ class REXData:
 
     def get_dataframe(self):
         return self.df
+#
+
+
+#endregion --------------------------------------------------------------------
+
+
+# -----------------------------------------------------------------------------
+#                      Robosample file manager
+#region REXFileManager --------------------------------------------------------
+class REXFileManager:
+    def __init__(self, base_dir, pattern="out."):
+        """
+        Parameters:
+        - base_dir: directory with simulation output files
+        - pattern: prefix pattern for filenames (default: 'out.')
+        """
+        self.base_dir = base_dir
+        self.pattern = pattern
+        self.files = self._find_files()
+        self.data = self._load_all()  # Merged DataFrame from all REXData instances
+
+    def _find_files(self):
+        """Finds all matching files in the base directory."""
+        return sorted([
+            os.path.join(self.base_dir, f)
+            for f in os.listdir(self.base_dir)
+            if f.startswith(self.pattern)
+        ])
+
+    def _load_all(self):
+        """Loads and merges all REXData instances into one DataFrame with source tags."""
+        all_dfs = []
+        for filepath in self.files:
+            rex = REXData(filepath)
+            df = rex.get_dataframe().copy()
+            df['source'] = os.path.basename(filepath)
+            all_dfs.append(df)
+        return pd.concat(all_dfs, ignore_index=True)
+
+    def get_dataframe(self):
+        return self.data
+
+    def plot_file_distribution(self, by="replicaIx"):
+        """Plots how values of `by` are distributed across different files."""
+        import matplotlib.pyplot as plt
+
+        grouped = self.data.groupby(['source', by]).size().unstack(fill_value=0)
+        grouped.T.plot(kind='bar', stacked=True, figsize=(12, 6))
+        plt.xlabel(by)
+        plt.ylabel("Count")
+        plt.title(f"Distribution of {by} across files")
+        plt.tight_layout()
+        plt.show()
+
+#endregion --------------------------------------------------------------------
+
+
+# -----------------------------------------------------------------------------
+#                      ExperimentsValidations
+#region ExperimentsValidations ------------------------------------------------
+class ExperimentsValidations:
+    def __init__(self, bomething):
+        """
+        Parameters:
+        - bomething: blabla
+        """
+        self.bomething = bomething
 
     def summary_stats(self, column):
         if column not in self.df.columns:
@@ -119,6 +189,16 @@ class REXData:
         group = self.df[self.df['replicaIx'] == replica_id].sort_values('nofSamples')
         return list(zip(group['nofSamples'], group['thermoIx']))
 
+#endregion --------------------------------------------------------------------
+
+
+
+
+
+
+
+
+
 
 
 # -----------------------------------------------------------------------------
@@ -133,6 +213,7 @@ parser.add_argument('--extension', default='',
 parser.add_argument('--inFNRoots', default=[], nargs='+',
     help='Robosample processed output file root names')
 args = parser.parse_args()
+#endregion --------------------------------------------------------------------
 
 # -----------------------------------------------------------------------------
 #                            Main function
@@ -174,6 +255,8 @@ def main(dir, inFNRoots):
     # Trace the path of replica 0
     # path = rex.trace_replica_path(0)
     # print(path[0])
+#endregion --------------------------------------------------------------------
+
 
 # -----------------------------------------------------------------------------
 #                            Main call
