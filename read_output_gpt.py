@@ -14,6 +14,7 @@ class REXData:
 
         self.filepath = inFN
         self.df = self._load_data()
+    #
     
     def _load_data(self):
         # Load only lines starting with "REX," (skip header and initial shell prompt)
@@ -45,12 +46,11 @@ class REXData:
         # Convert numeric columns
         df = df.apply(pd.to_numeric, errors='ignore')
         return df
+    #
 
     def get_dataframe(self):
         return self.df
-#
-
-
+    #
 #endregion --------------------------------------------------------------------
 
 

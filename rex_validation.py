@@ -27,7 +27,7 @@ class ExperimentsValidations:
                 if prev_thermoIx is not None and thermoIx != prev_thermoIx:
                     count += 1
                 prev_thermoIx = thermoIx
-            exchange_counts[replica] = count / group['nofSamples'][-1]
+            exchange_counts[replica] = count / group['nofSamples'].max()
         return exchange_counts
 
     def plot_replica_trajectories(self, save_path=None):
