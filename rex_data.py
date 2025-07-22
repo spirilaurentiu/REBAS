@@ -2,24 +2,19 @@
 import pandas as pd
 import sys
 
-SELECTED_COLUMNS = [
-    "replicaIx", "thermoIx", "wIx", "T",
-    "ts", "mdsteps",
-    "pe_o", "pe_n", "pe_set",
-    "ke_prop", "ke_n",
-    "fix_o", "fix_n",
-    #"logSineSqrGamma2_o", "logSineSqrGamma2_n",
-    #"etot_n", "etot_proposed",
-    #"JDetLog",
-    "acc", "MDorMC"
-]
-
+# -----------------------------------------------------------------------------
+#                      Robosample output reader
+#region REXData ---------------------------------------------------------------
 class REXData:
-    def __init__(self, filepath):
+    ''' 
+    '''
+    def __init__(self, filepath, SELECTED_COLUMNS):
+        self.SELECTED_COLUMNS = SELECTED_COLUMNS
         self.filepath = filepath
         self.df = self._load_data()
 
     def _load_data(self):
+        """ Get data from a file """
         try:
             selected_indices = []
             data_rows = []
@@ -37,7 +32,7 @@ class REXData:
 
                         if not selected_indices:
                             header = fields
-                            selected_indices = [colIx for colIx, name in enumerate(header) if name in SELECTED_COLUMNS]
+                            selected_indices = [colIx for colIx, name in enumerate(header) if name in self.SELECTED_COLUMNS]
                             selected_names = [header[seleIx] for seleIx in selected_indices]
                             continue  # skip header line
 
@@ -57,9 +52,13 @@ class REXData:
         except Exception as e:
             print(f"Error loading REX data from {self.filepath}: {e}", file=sys.stderr)
             raise
+    #
 
     def get_dataframe(self):
         return self.df
+    #
 
     def filter_by_world(self, wIx):
         return self.df[self.df['wIx'] == wIx]
+    #
+#endregion --------------------------------------------------------------------
