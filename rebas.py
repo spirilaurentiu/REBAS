@@ -111,23 +111,35 @@ def main(args):
 
     print(df)
 
-    # Evaluate efficiency
-    rexEff = REXEfficiency(df)
+    #region Validation figures
 
-    # # Calculate exchange rate
-    # eff_df = rexEff.calc_exchange_rates() 
-    # print(eff_df)
+    #region Efficiency figures
+    if 1 in args.figures:
+        roboAna = RoboAnalysis(df)
 
-    # Calculate autocorrelation function
-    max_lag = 50
-    acorCk_df = rexEff.compute_autocorrelation(max_lag) # per replica
-    print(acorCk_df)
+        # Acceptance rate
+        acc_df = roboAna.compute_acceptance(cumulative=True)
+        print(acc_df)
 
-    acorC_df = rexEff.compute_mean_autocorrelation(max_lag) # total
-    print(acorC_df)
+    if 2 in args.figures:
 
-    tau_df = rexEff.compute_autocorrelation_time(max_lag) # total autocorrelation time
-    print(tau_df)    
+        rexEff = REXEfficiency(df)
+
+        # Calculate exchange rate
+        eff_df = rexEff.calc_exchange_rates() 
+        print(eff_df)
+
+        # Calculate autocorrelation function
+        max_lag = 50
+        acorCk_df = rexEff.compute_autocorrelation(max_lag) # per replica
+        print(acorCk_df)
+
+        acorC_df = rexEff.compute_mean_autocorrelation(max_lag) # total
+        print(acorC_df)
+
+        tau_df = rexEff.compute_autocorrelation_time(max_lag) # total autocorrelation time
+        print(tau_df)
+    #endregion  
 
 
 
@@ -143,6 +155,8 @@ if __name__ == "__main__":
                    help='Columns to be read')
     parser.add_argument('--filterBy', nargs='*', default=[],
                    help='Optional filters in the format col=value (e.g. wIx=0)')
+    parser.add_argument('--figures', nargs='+', default=[], type=int,
+                   help='Figures or data that will be produced.')    
     args = parser.parse_args()
 
     main(args)
