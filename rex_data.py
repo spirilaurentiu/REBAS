@@ -6,7 +6,7 @@ import sys
 #                      Robosample output reader
 #region REXData ---------------------------------------------------------------
 class REXData:
-    ''' 
+    ''' Read Robosample data from a file 
     '''
     def __init__(self, filepath, SELECTED_COLUMNS):
         self.SELECTED_COLUMNS = SELECTED_COLUMNS

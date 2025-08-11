@@ -8,7 +8,7 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from rex_data import REXData
-from rex_efficiency import REXEfficiency
+from rex_efficiency import RoboAnalysis, REXEfficiency
 from rex_efficiency import REXEnergy
 
 
@@ -125,8 +125,39 @@ def main(args):
 
     print(df)
 
+
+
+    #region Efficiency figures
+    if 1 in args.figures:
+        roboAna = RoboAnalysis(df)
+
+        # Acceptance rate
+        acc_df = roboAna.compute_acceptance(cumulative=True)
+        print(acc_df)
+
+    if 2 in args.figures:
+
+        rexEff = REXEfficiency(df)
+
+        # Calculate exchange rate
+        eff_df = rexEff.calc_exchange_rates() 
+        print(eff_df)
+
+        # Calculate autocorrelation function
+        max_lag = 50
+        acorCk_df = rexEff.compute_autocorrelation(max_lag) # per replica
+        print(acorCk_df)
+
+        acorC_df = rexEff.compute_mean_autocorrelation(max_lag) # total
+        print(acorC_df)
+
+        tau_df = rexEff.compute_autocorrelation_time(max_lag) # total autocorrelation time
+        print(tau_df)
+    #endregion  
+
+
     potentialEnergyFigure = False
-    efficiencyFigure = True
+    efficiencyFigure = False
 
     if potentialEnergyFigure:
         E_analyzer = REXEnergy(df)
@@ -147,6 +178,8 @@ def main(args):
         plt.grid(True)
         plt.tight_layout()
         plt.show()        
+    #region Validation figures
+
 
     if efficiencyFigure:
 
@@ -183,6 +216,8 @@ if __name__ == "__main__":
     parser.add_argument('--useCache', action='store_true', help='Load data from cache file if it exists')
     parser.add_argument('--writeCache', action='store_true', help='Write new cache file (fails if file exists)')
     parser.add_argument('--cacheFile', default='rex_cache.pkl', help='Path to cache file')
+    parser.add_argument('--figures', nargs='+', default=[], type=int,
+                   help='Figures or data that will be produced.')    
     args = parser.parse_args()
 
     main(args)
