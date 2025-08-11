@@ -148,3 +148,60 @@ class REXEfficiency:
         return pd.DataFrame(grouped)
     #     
 #endregion --------------------------------------------------------------------
+
+
+# -----------------------------------------------------------------------------
+#                      Robosample per replica analysis
+#region Robosample ------------------------------------------------------------
+class RoboAnalysis:
+    '''
+    RoboAnalysis provides validation and analysis routines for simulation data.
+
+    Attributes:
+        df: The DataFrame containing simulation data
+    '''
+    def __init__(self, df):
+        self.df = df
+    #
+
+    def compute_acceptance(self, cumulative=False):
+        '''
+        Calculate acceptance rates for one simulation.
+
+        Returns:
+            A DataFrame with columns:
+                - replicaIx
+                - sim_type
+                - seed
+                - n_acc
+                - n_total
+                - acc_rate (n_acc / (n_total - 1))
+        '''
+        results = []
+        grouped = self.df.groupby(['replicaIx', 'sim_type', 'seed'])
+
+        for (replica, sim_type, seed), group in grouped:
+            acc_series = group['acc'].values
+            n_total = len(acc_series)
+            if n_total <= 1:
+                acc_rate = 0.0
+                n_acc = 0
+            else:
+                n_acc = (acc_series).sum()
+                acc_rate = n_acc / (n_total)
+            results.append({
+                'replicaIx': replica,
+                'sim_type': sim_type,
+                'seed': seed,
+                'n_acc': n_acc,
+                'n_total': n_total,
+                'exchange_rate': acc_rate
+            })
+            
+        return pd.DataFrame(results)
+    #
+#endregion --------------------------------------------------------------------
+
+
+
+
