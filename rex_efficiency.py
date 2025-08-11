@@ -6,8 +6,7 @@ import numpy as np
 #                      Robosample efficiency estimator
 #region REXEfficiency ----------------------------------------------------------
 class REXEfficiency:
-    '''
-    REXValidator provides validation and analysis routines for REX simulation data.
+    ''' REXEfficiency provides analysis routines for REX simulation data.
 
     Attributes:
         df: The DataFrame containing simulation data
@@ -22,8 +21,7 @@ class REXEfficiency:
     #
 
     def calc_exchange_rates(self):
-        '''
-        Calculate exchange rates for each replica.
+        ''' Calculate exchange rates for each replica.
         Exchange rate is defined as the fraction of times a replica changes its thermoIx.
 
         Returns:
@@ -38,8 +36,14 @@ class REXEfficiency:
         results = []
         grouped = self.df.groupby(['replicaIx', 'sim_type', 'seed'])
 
+
+        burnin = 1000
+
         for (replica, sim_type, seed), group in grouped:
             thermo_series = group['thermoIx'].values
+
+            thermo_series = thermo_series[burnin:]  # Skip burn-in period
+
             n_total = len(thermo_series)
             if n_total <= 1:
                 exchange_rate = 0.0
@@ -60,8 +64,7 @@ class REXEfficiency:
     #
 
     def compute_autocorrelation(self, max_lag):
-        '''
-        Compute autocorrelation function C_k(t) for each replica up to max_lag.
+        ''' Compute autocorrelation function C_k(t) for each replica up to max_lag.
 
         C_k(t) = (<M_k(s) M_k(s + t)> - <M_k(s)>^2) / (<M_k(s)^2> - <M_k(s)>^2)
 
@@ -103,8 +106,7 @@ class REXEfficiency:
     #
 
     def compute_mean_autocorrelation(self, max_lag):
-        '''
-        Compute the average autocorrelation C(t) over all replicas:
+        ''' Compute the average autocorrelation C(t) over all replicas:
 
         C(t) = (1/K) * sum_k C_k(t)
 
@@ -124,8 +126,7 @@ class REXEfficiency:
     #
 
     def compute_autocorrelation_time(self, max_lag):
-        '''
-        Compute the integrated autocorrelation time τ_ac per seed:
+        ''' Compute the integrated autocorrelation time τ_ac per seed:
 
         τ_ac = sum_{t=1}^{T} [1 - (t / T)] * C(t)
 
@@ -147,4 +148,43 @@ class REXEfficiency:
 
         return pd.DataFrame(grouped)
     #     
+#endregion --------------------------------------------------------------------
+
+# -----------------------------------------------------------------------------
+#                      Robosample energy analysis
+#region REXEnergy -------------------------------------------------------------
+class REXEnergy:
+    ''' REXEnergy provides routines to analyze energy distributions from REX simulations.
+
+    Attributes:
+        df: The DataFrame containing simulation data
+    '''
+    def __init__(self, df):
+        self.df = df
+    #
+
+    def pe_o_histograms(self, bins=50, lower_percentile=0.005, upper_percentile=99.995):
+        ''' Compute histograms of potential energy (pe_o) per (seed, thermoIx).
+
+        Arguments:
+            bins: Number of bins or bin edges to use for histogramming
+
+        Returns:
+            Dictionary mapping (seed, thermoIx) -> (hist, bin_edges)
+        '''
+        histograms = {}
+        grouped = self.df.groupby(['seed', 'thermoIx'])
+
+        peo_clean = self.df['pe_o'].dropna()
+        vmin = np.percentile(peo_clean, lower_percentile)
+        vmax = np.percentile(peo_clean, upper_percentile)
+        bin_edges = np.linspace(vmin, vmax, bins + 1)
+
+        for (seed, thermoIx), group in grouped:
+            values = group['pe_o'].dropna().values
+            hist, _ = np.histogram(values, bins=bin_edges, density=True)
+            histograms[(seed, thermoIx)] = (hist, bin_edges)
+
+        return histograms
+    #
 #endregion --------------------------------------------------------------------

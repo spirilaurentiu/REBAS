@@ -5,8 +5,12 @@ import re
 import sys
 import glob
 import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
 from rex_data import REXData
 from rex_efficiency import REXEfficiency
+from rex_efficiency import REXEnergy
+
 
 
 # -----------------------------------------------------------------------------
@@ -98,8 +102,18 @@ def parse_filters(filters):
 def main(args):
 
     # Get all the data
-    FNManager = REXFNManager(args.dir, args.inFNRoots, args.cols)
-    df = FNManager.getDataFromAllFiles()
+    if args.useCache and os.path.exists(args.cacheFile):
+        print(f"Loading data from cache: {args.cacheFile}")
+        df = pd.read_pickle(args.cacheFile)
+    else:
+        FNManager = REXFNManager(args.dir, args.inFNRoots, args.cols)
+        df = FNManager.getDataFromAllFiles()
+
+        if args.writeCache:
+            if os.path.exists(args.cacheFile):
+                raise FileExistsError(f"Cache file '{args.cacheFile}' already exists. Use a different name or delete it.")
+            print(f"Writing data to cache: {args.cacheFile}")
+            df.to_pickle(args.cacheFile)
 
     # Apply filters if specified
     if args.filterBy:
@@ -111,25 +125,48 @@ def main(args):
 
     print(df)
 
-    # Evaluate efficiency
-    rexEff = REXEfficiency(df)
+    potentialEnergyFigure = False
+    efficiencyFigure = True
 
-    # # Calculate exchange rate
-    # eff_df = rexEff.calc_exchange_rates() 
-    # print(eff_df)
+    if potentialEnergyFigure:
+        E_analyzer = REXEnergy(df)
+        pe_histograms = E_analyzer.pe_o_histograms(bins=50)
+        print(pe_histograms)
 
-    # Calculate autocorrelation function
-    max_lag = 50
-    acorCk_df = rexEff.compute_autocorrelation(max_lag) # per replica
-    print(acorCk_df)
+    # Plot each seed's histogram
+        plt.figure()
+        for (seed, thermoIx), (hist, bin_edges) in pe_histograms.items():
+            #plt.xlim(-2000, 0)
 
-    acorC_df = rexEff.compute_mean_autocorrelation(max_lag) # total
-    print(acorC_df)
+            plt.plot(bin_edges[:-1], hist)
 
-    tau_df = rexEff.compute_autocorrelation_time(max_lag) # total autocorrelation time
-    print(tau_df)    
+        plt.title(f"Histogram of pe_o for seed {seed}")
+        plt.xlabel("pe_o")
+        plt.ylabel("Density")
+        plt.legend(pe_histograms.keys(), title="Seeds")
+        plt.grid(True)
+        plt.tight_layout()
+        plt.show()        
 
+    if efficiencyFigure:
 
+        # Evaluate efficiency
+        rexEff = REXEfficiency(df)
+
+        # # Calculate exchange rate
+        eff_df = rexEff.calc_exchange_rates() 
+        print(eff_df)
+
+        # Calculate autocorrelation function
+        max_lag = 50
+        acorCk_df = rexEff.compute_autocorrelation(max_lag) # per replica
+        print(acorCk_df)
+
+        acorC_df = rexEff.compute_mean_autocorrelation(max_lag) # total
+        print(acorC_df)
+
+        tau_df = rexEff.compute_autocorrelation_time(max_lag) # total autocorrelation time
+        print(tau_df)    
 
 #endregion --------------------------------------------------------------------
 
@@ -143,10 +180,12 @@ if __name__ == "__main__":
                    help='Columns to be read')
     parser.add_argument('--filterBy', nargs='*', default=[],
                    help='Optional filters in the format col=value (e.g. wIx=0)')
+    parser.add_argument('--useCache', action='store_true', help='Load data from cache file if it exists')
+    parser.add_argument('--writeCache', action='store_true', help='Write new cache file (fails if file exists)')
+    parser.add_argument('--cacheFile', default='rex_cache.pkl', help='Path to cache file')
     args = parser.parse_args()
 
     main(args)
-
 
 # SELECTED_COLUMNS = [
 #     "replicaIx", "thermoIx", "wIx", "T", 
