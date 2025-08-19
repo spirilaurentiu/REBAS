@@ -155,23 +155,21 @@ class REXEfficiency:
 #                      Robosample per replica analysis
 #region Robosample ------------------------------------------------------------
 class RoboAnalysis:
-    '''
-    RoboAnalysis provides validation and analysis routines for simulation data.
-
+    """ RoboAnalysis provides validation and analysis routines for simulation data.
     Attributes:
         df: The DataFrame containing simulation data
-    '''
+    """
     def __init__(self, df):
         self.df = df
     #
 
+    # Calculate acceptance rates for one simulation
     def compute_acceptance(self, cumulative=False):
-        '''
-        Calculate acceptance rates for one simulation.
+        ''' Calculate acceptance rates for one simulation.
 
         Returns:
             A DataFrame with columns:
-                - replicaIx
+                - thermoIx
                 - sim_type
                 - seed
                 - n_acc
@@ -179,9 +177,9 @@ class RoboAnalysis:
                 - acc_rate (n_acc / (n_total - 1))
         '''
         results = []
-        grouped = self.df.groupby(['replicaIx', 'sim_type', 'seed'])
+        grouped = self.df.groupby(['thermoIx', 'sim_type', 'seed'])
 
-        for (replica, sim_type, seed), group in grouped:
+        for (thermoIx, sim_type, seed), group in grouped:
             acc_series = group['acc'].values
             n_total = len(acc_series)
             if n_total <= 1:
@@ -191,7 +189,7 @@ class RoboAnalysis:
                 n_acc = (acc_series).sum()
                 acc_rate = n_acc / (n_total)
             results.append({
-                'replicaIx': replica,
+                'thermoIx': thermoIx,
                 'sim_type': sim_type,
                 'seed': seed,
                 'n_acc': n_acc,
@@ -201,24 +199,12 @@ class RoboAnalysis:
             
         return pd.DataFrame(results)
     #
-#endregion --------------------------------------------------------------------
 
-
-# -----------------------------------------------------------------------------
-#                      Robosample energy analysis
-#region REXEnergy -------------------------------------------------------------
-class REXEnergy:
-    ''' REXEnergy provides routines to analyze energy distributions from REX simulations.
-    '''
-
-
-
+    # Compute histograms of potential energy (pe_o) per (seed, thermoIx).
     def pe_o_histograms(self, bins=50, lower_percentile=0.005, upper_percentile=99.995):
         ''' Compute histograms of potential energy (pe_o) per (seed, thermoIx).
-
         Arguments:
             bins: Number of bins or bin edges to use for histogramming
-
         Returns:
             Dictionary mapping (seed, thermoIx) -> (hist, bin_edges)
         '''
@@ -239,4 +225,33 @@ class REXEnergy:
         return histograms
     #
 
+    # Compute histograms of ΔE = pe_n - pe_o per (seed, thermoIx).
+    def delta_pe_histograms(self, bins=50, lower_percentile=0.005, upper_percentile=99.995):
+        ''' Compute histograms of ΔE = pe_n - pe_o per (seed, thermoIx).
+
+        Arguments:
+            bins : Number of bins or bin edges to use for histogramming
+            lower_percentile : Lower bound percentile for histogram range (default 0.005)
+            upper_percentile : Upper bound percentile for histogram range (default 99.995)
+
+        Returns:
+            Dictionary mapping (seed, thermoIx) -> (hist, bin_edges)
+        '''
+        histograms = {}
+        grouped = self.df.groupby(['seed', 'thermoIx'])
+
+        # Compute ΔE and clean NaNs
+        delta_pe = (self.df['pe_n'] - self.df['pe_o']).dropna()
+        vmin = np.percentile(delta_pe, lower_percentile)
+        vmax = np.percentile(delta_pe, upper_percentile)
+        bin_edges = np.linspace(vmin, vmax, bins + 1)
+
+        for (seed, thermoIx), group in grouped:
+            values = (group['pe_n'] - group['pe_o']).dropna().values
+            hist, _ = np.histogram(values, bins=bin_edges, density=True)
+            histograms[(seed, thermoIx)] = (hist, bin_edges)
+
+        return histograms
+    #
 #endregion --------------------------------------------------------------------
+

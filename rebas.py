@@ -6,10 +6,12 @@ import sys
 import glob
 import pandas as pd
 import numpy as np
+import matplotlib
 import matplotlib.pyplot as plt
+matplotlib.use('Agg')
+
 from rex_data import REXData
 from rex_efficiency import RoboAnalysis, REXEfficiency
-from rex_efficiency import REXEnergy
 
 
 
@@ -27,11 +29,12 @@ except Exception:
     _HAS_PARMED = False
 
 class REXFNManager:
-    ''' File manager
+    """ File manager
     Attributes:
         dir: Directory containing the files
         FNRoots: File prefixes
-    '''
+        SELECTED_COLUMNS: columns selected to be read from file
+    """
     def __init__(self, dir, FNRoots, SELECTED_COLUMNS):
         self.dir = dir
         self.FNRoots = FNRoots
@@ -86,49 +89,11 @@ class REXFNManager:
 
         return pd.concat(all_data, ignore_index=True) if all_data else pd.DataFrame()
     #
-    def write_restarts_from_trajectories_mda(self, restDir, topology):
-        '''
-        Read trajectory files of the form <mol>_<seed>.<replica>.dcd,
-        extract the last frame, and write restart (rst7) files into restDir.
 
-        Arguments:
-            restDir: Directory to store restart files
-            topology: Path to a topology file (prmtop or pdb) required to read the DCDs
-
-        Output:
-            For each trajectory file <mol>_<seed>.<replica>.dcd, writes:
-                restDir/<mol>_<seed>.<replica>.rst7
-        '''
-        print(f"Writing restarts with MDAnalysis is not implemented", file=sys.stderr)
-        return
-    
-        target_dir = os.path.join(self.dir, restDir)
-        os.makedirs(target_dir, exist_ok=True)
-
-        traj_files = glob.glob(os.path.join(self.dir, "*.dcd"))
-        if not traj_files:
-            print(f"Warning: No trajectory files found in {self.dir}", file=sys.stderr)
-            return
-
-        for traj in traj_files:
-            base = os.path.basename(traj)
-            root, _ = os.path.splitext(base)  # <mol>_<seed>.<replica>
-
-            try:
-                u = mda.Universe(topology, traj)
-                u.trajectory[-1]  # jump to last frame
-                rst_path = os.path.join(target_dir, f"{root}.rst7")
-                with mda.Writer(rst_path, n_atoms=u.atoms.n_atoms) as w:
-                    w.write(u.select_atoms("all"))
-                print(f"Wrote restart: {rst_path}")
-            except Exception as e:
-                print(f"Error processing {traj}: {e}", file=sys.stderr)
-    #
-
+    # Write restart files into self.dir/restDir/restDir.<seed>
     def write_restarts_from_trajectories(self, restDir, topology, out_ext='rst7'):
-        '''
-        Read trajectory files of the form <mol>_<seed>.<replica>.dcd from self.dir,
-        extract the last frame, and write restart files into self.dir/restDir.
+        """ Read trajectory files of the form <mol>_<seed>.<replica>.dcd from self.dir,
+        extract the last frame, and write restart files into self.dir/restDir/restDir.<seed>.
 
         Arguments:
             restDir : Name of the subdirectory (inside self.dir) to store restart files
@@ -138,8 +103,9 @@ class REXFNManager:
 
         Output:
             For each trajectory file <mol>_<seed>.<replica>.dcd, writes:
-                self.dir/restDir/<mol>_<seed>.<replica>.<out_ext>
-        '''
+                self.dir/restDir/restDir.<seed>/<mol>_<seed>.<replica>.<out_ext>
+        """
+        
         traj_files = sorted(glob.glob(os.path.join(self.dir, '*.dcd')))
         if not traj_files:
             print(f"Warning: No trajectory files found in {self.dir}", file=sys.stderr)
@@ -208,13 +174,18 @@ class REXFNManager:
 #                                MAIN
 #region Main ------------------------------------------------------------------
 
+# Parse a set of filters given as arguments in the format: ---filterBy col=val
 def parse_filters(filters):
-    """Convert list of 'col=value' strings into a dict"""
+    """ Convert list of 'col=value' strings into a dict
+    """
     filter_dict = {}
-    for f in filters:
-        if '=' not in f:
-            raise ValueError(f"Invalid filter format: '{f}' (expected col=value)")
-        key, val = f.split('=', 1)
+    for currFilter in filters:
+
+        if '=' not in currFilter:
+            raise ValueError(f"Invalid filter format: '{currFilter}' (expected col=value)")
+        
+        key, val = currFilter.split('=', 1)
+
         try:
             val = int(val)
         except ValueError:
@@ -222,118 +193,142 @@ def parse_filters(filters):
                 val = float(val)
             except ValueError:
                 pass  # Leave as string
+
         filter_dict[key] = val
+
     return filter_dict
+#
 
-
+# MAIN function for the REBAS paper. Has two types of calculations:
+#   (I)   In-house checks
+#   (II)  Figures for the paper
+# Types of files:
+#   1) OUTPUT
+#   2) TRAJECTORY
+# Types of figures:
+#   1) Validation figures
+#       1.1) Potential energy based validation
+#       1.2) Free energy based validation
+#   2) Efficiency figures
+#       2.1) Exchange rates
+#       2.2) Autocorrelation-based functions
 def main(args):
 
-    OUTPUT, TRAJECTORY = False, True
+    OUTPUT_REQUIRED, TRAJECTORY_REQUIRED = True, False # flags
+    FNManager = None # classes
+    out_df, traj_df = None, None # pandas
 
-    if OUTPUT:
-        
-        # Get all the data
-        if args.useCache and os.path.exists(args.cacheFile):
-            print(f"Loading data from cache: {args.cacheFile}")
-            df = pd.read_pickle(args.cacheFile)
-        else:
-            FNManager = REXFNManager(args.dir, args.inFNRoots, args.cols)
-            df = FNManager.getDataFromAllFiles()
+    #region Read output from all files
+    if args.useCache and os.path.exists(args.cacheFile):
+        print(f"Loading data from cache: {args.cacheFile}")
+        out_df = pd.read_pickle(args.cacheFile)
+    else:
+        FNManager = REXFNManager(args.dir, args.inFNRoots, args.cols)
+        out_df = FNManager.getDataFromAllFiles()
 
-            if args.writeCache:
-                if os.path.exists(args.cacheFile):
-                    raise FileExistsError(f"Cache file '{args.cacheFile}' already exists. Use a different name or delete it.")
-                print(f"Writing data to cache: {args.cacheFile}")
-                df.to_pickle(args.cacheFile)
+        if args.writeCache:
+            if os.path.exists(args.cacheFile):
+                raise FileExistsError(f"Cache file '{args.cacheFile}' already exists. Use a different name or delete it.")
+            print(f"Writing data to cache: {args.cacheFile}")
+            out_df.to_pickle(args.cacheFile)                
 
-            if args.restDir:
-                FNManager.write_restarts_from_trajectories(args.restDir, args.topology)
+    # Apply filters if specified
+    if args.filterBy:
+        filters = parse_filters(args.filterBy)
+        for col, val in filters.items():
+            if col not in out_df.columns:
+                raise ValueError(f"Filter column '{col}' not found in DataFrame columns.")
+            out_df = out_df[out_df[col] == val]
 
-        # Apply filters if specified
-        if args.filterBy:
-            filters = parse_filters(args.filterBy)
-            for col, val in filters.items():
-                if col not in df.columns:
-                    raise ValueError(f"Filter column '{col}' not found in DataFrame columns.")
-                df = df[df[col] == val]
+    print(out_df)
+    #endregion
 
-        print(df)
+    #region Restart: write restart files into self.dir/restDir/restDir.<seed>
+    if (args.restDir):
+        TRAJECTORY_REQUIRED = True
+        FNManager.write_restarts_from_trajectories(args.restDir, args.topology)
+    #endregion
 
-        #region Efficiency figures
-        if 1 in args.figures:
-            roboAna = RoboAnalysis(df)
+    #region In-house checks: acceptance
+    if 'acceptance' in args.checks:
+        roboAna = RoboAnalysis(out_df)
 
-            # Acceptance rate
-            acc_df = roboAna.compute_acceptance(cumulative=True)
-            print(acc_df)
+        # Acceptance rate
+        acc_df = roboAna.compute_acceptance(cumulative=True)
+        print("Acceptance rates")
+        print(acc_df)
 
-        if 2 in args.figures:
+    if 'dpe' in args.checks:
+        roboAna = RoboAnalysis(out_df)
+        dpe_df = roboAna.delta_pe_histograms(bins=50)
+        print('Delta potential energy')
+        print(dpe_df)
+        plt.figure()
+        for (seed, thermoIx), (hist, bin_edges) in dpe_df.items():
+            #plt.xlim(-2000, 0)
 
-            rexEff = REXEfficiency(df)
+            plt.plot(bin_edges[:-1], hist)
 
-            # Calculate exchange rate
-            eff_df = rexEff.calc_exchange_rates() 
-            print(eff_df)
+        plt.title(f"Histogram of dpe for seed {seed}")
+        plt.xlabel("dpe")
+        plt.ylabel("Density")
+        plt.legend(dpe_df.keys(), title="Seeds")
+        plt.grid(True)
+        plt.tight_layout()
+        #plt.show()
+        save_path = 'x.png'
+        plt.savefig(save_path)
+    #endregion
 
-            # Calculate autocorrelation function
-            max_lag = 50
-            acorCk_df = rexEff.compute_autocorrelation(max_lag) # per replica
-            print(acorCk_df)
+    #region Paper figures: Validation
+    if "potentialEnergyDistrib" in args.figures:
+        roboAna = RoboAnalysis(out_df)
 
-            acorC_df = rexEff.compute_mean_autocorrelation(max_lag) # total
-            print(acorC_df)
+        pe_histograms = roboAna.pe_o_histograms(bins=50)
+        print(pe_histograms)
 
-            tau_df = rexEff.compute_autocorrelation_time(max_lag) # total autocorrelation time
-            print(tau_df)
-        #endregion  
+    # Plot each seed's histogram
+        plt.figure()
+        for (seed, thermoIx), (hist, bin_edges) in pe_histograms.items():
+            #plt.xlim(-2000, 0)
+
+            plt.plot(bin_edges[:-1], hist)
+
+        plt.title(f"Histogram of pe_o for seed {seed}")
+        plt.xlabel("pe_o")
+        plt.ylabel("Density")
+        plt.legend(pe_histograms.keys(), title="Seeds")
+        plt.grid(True)
+        plt.tight_layout()
+        #plt.show()
+        save_path = 'x.png'
+        plt.savefig(save_path)
+    #endregion
+
+    #region Paper figures: Efficiency
+    if "tau_ac" in args.figures:
+
+        rexEff = REXEfficiency(out_df)
+
+        # Calculate exchange rate
+        exch_df = rexEff.calc_exchange_rates()
+        print("Exchange rates")
+        print(exch_df)
+
+        # Calculate autocorrelation function
+        max_lag = 50
+        acorCk_df = rexEff.compute_autocorrelation(max_lag) # per replica
+        #print(acorCk_df)
+
+        acorC_df = rexEff.compute_mean_autocorrelation(max_lag) # total
+        #print(acorC_df)
+
+        tau_df = rexEff.compute_autocorrelation_time(max_lag) # total autocorrelation time
+        print(tau_df)
+    #endregion  
 
 
-        potentialEnergyFigure = False
-        efficiencyFigure = False
-
-        if potentialEnergyFigure:
-            E_analyzer = REXEnergy(df)
-            pe_histograms = E_analyzer.pe_o_histograms(bins=50)
-            print(pe_histograms)
-
-        # Plot each seed's histogram
-            plt.figure()
-            for (seed, thermoIx), (hist, bin_edges) in pe_histograms.items():
-                #plt.xlim(-2000, 0)
-
-                plt.plot(bin_edges[:-1], hist)
-
-            plt.title(f"Histogram of pe_o for seed {seed}")
-            plt.xlabel("pe_o")
-            plt.ylabel("Density")
-            plt.legend(pe_histograms.keys(), title="Seeds")
-            plt.grid(True)
-            plt.tight_layout()
-            plt.show()        
-        #region Validation figures
-
-
-        if efficiencyFigure:
-
-            # Evaluate efficiency
-            rexEff = REXEfficiency(df)
-
-            # # Calculate exchange rate
-            eff_df = rexEff.calc_exchange_rates() 
-            print(eff_df)
-
-            # Calculate autocorrelation function
-            max_lag = 50
-            acorCk_df = rexEff.compute_autocorrelation(max_lag) # per replica
-            print(acorCk_df)
-
-            acorC_df = rexEff.compute_mean_autocorrelation(max_lag) # total
-            print(acorC_df)
-
-            tau_df = rexEff.compute_autocorrelation_time(max_lag) # total autocorrelation time
-            print(tau_df)    
-
-    if TRAJECTORY:
+    if TRAJECTORY_REQUIRED:
         FNManager = REXFNManager(args.dir, args.inFNRoots, args.cols)
         
         FNManager.write_restarts_from_trajectories(args.restDir, args.topology)
@@ -342,27 +337,37 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('--dir', required=True,
-                   help='Directory with data files')
-    parser.add_argument('--inFNRoots', nargs='+', required=True,
-                   help='Robosample processed output file names')
-    parser.add_argument('--restDir',
-                   help='Directory with restart files')
-    parser.add_argument('--topology',
-                   help='Topology file')
-    parser.add_argument('--cols', nargs='+',
-                   help='Columns to be read')
-    parser.add_argument('--filterBy', nargs='*', default=[],
-                   help='Optional filters in the format col=value (e.g. wIx=0)')
+    parser.add_argument('--dir', required=True, help='Directory with data files')
+    parser.add_argument('--inFNRoots', nargs='+', required=True, help='Robosample processed output file names')
+    parser.add_argument('--restDir', help='Directory where restart files are put')
+    parser.add_argument('--topology', help='Topology file')
+    parser.add_argument('--cols', nargs='+', help='Columns to be read')
+    parser.add_argument('--filterBy', nargs='*', default=[], help='Optional filters in the format col=value (e.g. wIx=0)')
     parser.add_argument('--useCache', action='store_true', help='Load data from cache file if it exists')
     parser.add_argument('--writeCache', action='store_true', help='Write new cache file (fails if file exists)')
     parser.add_argument('--cacheFile', default='rex_cache.pkl', help='Path to cache file')
-    parser.add_argument('--figures', nargs='+', default=[], type=int,
-                   help='Figures or data that will be produced.')    
+
+    #parser.add_argument('--xxx', action='store_true', default=False, help='xxx')
+    parser.add_argument('--checks', nargs='+', default=[], help='Checks: acceptance, ')
+
+
+    parser.add_argument('--figures', nargs='+', default=[], type=str, help='Figures: tau_ac, potentialEnergyDistrib')
     args = parser.parse_args()
 
     main(args)
 
+#region temp docs
+# Example usage:
+# python ~/git6/REBAS/rebas.py --dir prod/trpch/mulReplSalieri/ --inFNRoots out.3030500 --cols replicaIx thermoIx wIx acc --filterBy wIx=7 --checks acceptance --figures tau_ac
+#
+# Header description:
+# "replicaIx" means replica,
+# "thermoIx" means temperature index,
+# "wIx" means what part of the molecule was simulated as a Gibbs block,
+# "ts" means the timestep used to integrate,
+# "mdsteps" how many steps was integrated for a Hamiltonian Monte Carlo trial
+# "pe_o" means
+# 
 # SELECTED_COLUMNS = [
 #     "replicaIx", "thermoIx", "wIx", "T", 
 #     "ts", "mdsteps",
@@ -374,12 +379,4 @@ if __name__ == "__main__":
 #     "JDetLog",
 #     "acc", "MDorMC"
 # ]
-
-# Header description:
-# "replicaIx" means replica,
-# "thermoIx" means temperature index,
-# "wIx" means what part of the molecule was simulated as a Gibbs block,
-# "ts" means the timestep used to integrate,
-# "mdsteps" how many steps was integrated for a Hamiltonian Monte Carlo trial
-# "pe_o" means
-# 
+#endregion
