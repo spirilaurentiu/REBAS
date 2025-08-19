@@ -262,12 +262,13 @@ def main(args):
         roboAna = RoboAnalysis(out_df)
         dpe_df = roboAna.delta_pe_histograms(bins=50)
         print('Delta potential energy')
-        print(dpe_df)
         plt.figure()
-        for (seed, thermoIx), (hist, bin_edges) in dpe_df.items():
-            #plt.xlim(-2000, 0)
 
-            plt.plot(bin_edges[:-1], hist)
+        dpe_colors = ["blue", "red", "black", "grey", "green", "brown", "cyan", "purple", "yellow", "pink"]
+        pIx = -1
+        for (seed, thermoIx), (hist, bin_edges) in dpe_df.items():
+            pIx += 1
+            plt.plot(bin_edges[:-1], hist, color = dpe_colors[pIx])
 
         plt.title(f"Histogram of dpe for seed {seed}")
         plt.xlabel("dpe")
