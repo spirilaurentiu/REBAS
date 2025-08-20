@@ -199,6 +199,79 @@ def parse_filters(filters):
     return filter_dict
 #
 
+# Generic plotting function for timelines
+def plot_column(df, col, save_path=None):
+    """ Plot values of a single column in the order they appear in the DataFrame.
+    Arguments:
+        df : DataFrame
+        col : column name to plot
+        save_path : optional, if given save plot to file
+    """
+    if col not in df.columns:
+        raise ValueError(f"Column '{col}' not found in DataFrame.")
+
+    grouped = df.groupby(['seed', 'thermoIx'])
+    plt.figure()
+    
+    colors = ["blue", "red", "black", "grey", "green", "brown", "cyan", "purple", "yellow", "pink"]
+    for i, ((seed, thermoIx), group) in enumerate(grouped):
+        color = colors[i % len(colors)]
+        plt.plot(group[col].to_numpy(), marker='.', linestyle='-', alpha=0.7, color=color, label=f"seed {seed}, thermo {thermoIx}")
+
+    plt.title(f"Plot of {col} grouped by seed & thermoIx")
+    plt.xlabel("Index")
+    plt.ylabel(col)
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+
+    if save_path:
+        plt.savefig(save_path)
+    else:
+        plt.show()
+#
+
+# Generic plotting function for histogram dictionaries
+def plot_histogram(hist_dict, title="title", xlabel="x", ylabel="Density", save_path=None):
+    """ Generic plotting function for histogram dictionaries of the form:
+        {(seed, thermoIx): (hist, bin_edges), ...}
+    Arguments:
+        hist_dict : dict
+            Dictionary mapping keys (e.g. (seed, thermoIx)) -> (hist, bin_edges)
+        title     : str
+            Title of the plot
+        xlabel    : str
+            Label for the x-axis
+        ylabel    : str
+            Label for the y-axis
+        save_path : str
+            File path to save the figure
+    """
+    plt.figure(figsize=(8, 6))
+    colors = [
+        "blue", "red", "black", "grey", "green",
+        "brown", "cyan", "purple", "yellow", "pink"
+    ]
+
+    for idx, (key, (hist, bin_edges)) in enumerate(hist_dict.items()):
+        color = colors[idx % len(colors)]
+        plt.plot(bin_edges[:-1], hist, color=color, label=str(key))
+
+    plt.title(title)
+    plt.xlabel(xlabel)
+    plt.ylabel(ylabel)
+    plt.legend(title="Group")
+    plt.grid(True)
+    plt.tight_layout()
+
+    if save_path:
+        plt.savefig(save_path)
+        print(f"Saved plot to {save_path}")
+    else:
+        plt.show()
+    plt.close()
+#
+
 # MAIN function for the REBAS paper. Has two types of calculations:
 #   (I)   In-house checks
 #   (II)  Figures for the paper
@@ -249,7 +322,28 @@ def main(args):
         FNManager.write_restarts_from_trajectories(args.restDir, args.topology)
     #endregion
 
-    #region In-house checks: acceptance
+    #region In-house basic checks
+    # Column histograms checks
+    if len(args.basicChecks) > 0:
+
+        roboAna = RoboAnalysis(out_df)
+
+        want_histogram = False
+        for column in args.basicChecks:
+            if want_histogram:
+                hist_df = roboAna.column_histograms(column, bins=50)
+                if not hist_df:
+                    print(f"Warning: no histogram data found for column '{column}'")
+                    continue  
+                save_path = f"check_{column}_hist.png"
+                plot_histogram(hist_df, save_path=save_path)
+            else:
+                save_path = f"check_{column}.png"
+                plot_column(out_df, column, save_path=save_path)
+    #endregion
+
+    #region In-house other checks
+    # Acceptance
     if 'acceptance' in args.checks:
         roboAna = RoboAnalysis(out_df)
 
@@ -258,52 +352,21 @@ def main(args):
         print("Acceptance rates")
         print(acc_df)
 
+    # Delta potential energy
     if 'dpe' in args.checks:
         roboAna = RoboAnalysis(out_df)
-        dpe_df = roboAna.delta_pe_histograms(bins=50)
-        print('Delta potential energy')
-        plt.figure()
-
-        dpe_colors = ["blue", "red", "black", "grey", "green", "brown", "cyan", "purple", "yellow", "pink"]
-        pIx = -1
-        for (seed, thermoIx), (hist, bin_edges) in dpe_df.items():
-            pIx += 1
-            plt.plot(bin_edges[:-1], hist, color = dpe_colors[pIx])
-
-        plt.title(f"Histogram of dpe for seed {seed}")
-        plt.xlabel("dpe")
-        plt.ylabel("Density")
-        plt.legend(dpe_df.keys(), title="Seeds")
-        plt.grid(True)
-        plt.tight_layout()
-        #plt.show()
-        save_path = 'x.png'
-        plt.savefig(save_path)
+        dpeHist_df = roboAna.delta_pe_histograms(bins=50)
+        plot_histogram(dpeHist_df, save_path=f"check_dpe_hist.png")
     #endregion
 
+
+
     #region Paper figures: Validation
-    if "potentialEnergyDistrib" in args.figures:
+    if "pe_o" in args.figures:
         roboAna = RoboAnalysis(out_df)
 
-        pe_histograms = roboAna.pe_o_histograms(bins=50)
-        print(pe_histograms)
-
-    # Plot each seed's histogram
-        plt.figure()
-        for (seed, thermoIx), (hist, bin_edges) in pe_histograms.items():
-            #plt.xlim(-2000, 0)
-
-            plt.plot(bin_edges[:-1], hist)
-
-        plt.title(f"Histogram of pe_o for seed {seed}")
-        plt.xlabel("pe_o")
-        plt.ylabel("Density")
-        plt.legend(pe_histograms.keys(), title="Seeds")
-        plt.grid(True)
-        plt.tight_layout()
-        #plt.show()
-        save_path = 'x.png'
-        plt.savefig(save_path)
+        hist_df = roboAna.column_histograms(bins=50)
+        plot_histogram(hist_df, save_path="x.png")
     #endregion
 
     #region Paper figures: Efficiency
@@ -349,7 +412,8 @@ if __name__ == "__main__":
     parser.add_argument('--cacheFile', default='rex_cache.pkl', help='Path to cache file')
 
     #parser.add_argument('--xxx', action='store_true', default=False, help='xxx')
-    parser.add_argument('--checks', nargs='+', default=[], help='Checks: acceptance, ')
+    parser.add_argument('--basicChecks', nargs='+', default=[], help='Checks: <col>')
+    parser.add_argument('--checks', nargs='+', default=[], help='Checks: acceptance, dpe')
 
 
     parser.add_argument('--figures', nargs='+', default=[], type=str, help='Figures: tau_ac, potentialEnergyDistrib')

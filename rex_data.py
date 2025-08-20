@@ -62,3 +62,5 @@ class REXData:
         return self.df[self.df['wIx'] == wIx]
     #
 #endregion --------------------------------------------------------------------
+
+

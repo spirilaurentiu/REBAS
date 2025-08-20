@@ -200,40 +200,48 @@ class RoboAnalysis:
         return pd.DataFrame(results)
     #
 
-    # Compute histograms of potential energy (pe_o) per (seed, thermoIx).
-    def pe_o_histograms(self, bins=50, lower_percentile=0.005, upper_percentile=99.995):
-        ''' Compute histograms of potential energy (pe_o) per (seed, thermoIx).
+    # Compute histograms of values from any given column per (seed, thermoIx)
+    def column_histograms(self, column, bins=50, lower_percentile=0.005, upper_percentile=99.995):
+        ''' Compute histograms of values from any given column per (seed, thermoIx).
         Arguments:
-            bins: Number of bins or bin edges to use for histogramming
+            column : str
+                Column name in self.df to histogram
+            bins   : int or sequence
+                Number of bins or bin edges to use for histogramming
+            lower_percentile : float
+                Lower cutoff percentile for bin range
+            upper_percentile : float
+                Upper cutoff percentile for bin range
         Returns:
             Dictionary mapping (seed, thermoIx) -> (hist, bin_edges)
         '''
+        if column not in self.df.columns:
+            print(f"Warning: Column '{column}' not found in DataFrame")
+            return {}
 
         histograms = {}
         grouped = self.df.groupby(['seed', 'thermoIx'])
 
-        peo_clean = self.df['pe_o'].dropna()
-        vmin = np.percentile(peo_clean, lower_percentile)
-        vmax = np.percentile(peo_clean, upper_percentile)
+        col_clean = self.df[column].dropna()
+        vmin = np.percentile(col_clean, lower_percentile)
+        vmax = np.percentile(col_clean, upper_percentile)
         bin_edges = np.linspace(vmin, vmax, bins + 1)
 
         for (seed, thermoIx), group in grouped:
-            values = group['pe_o'].dropna().values
+            values = group[column].dropna().values
             hist, _ = np.histogram(values, bins=bin_edges, density=True)
             histograms[(seed, thermoIx)] = (hist, bin_edges)
 
         return histograms
-    #
+
 
     # Compute histograms of ΔE = pe_n - pe_o per (seed, thermoIx).
     def delta_pe_histograms(self, bins=50, lower_percentile=0.005, upper_percentile=99.995):
         ''' Compute histograms of ΔE = pe_n - pe_o per (seed, thermoIx).
-
         Arguments:
             bins : Number of bins or bin edges to use for histogramming
             lower_percentile : Lower bound percentile for histogram range (default 0.005)
             upper_percentile : Upper bound percentile for histogram range (default 99.995)
-
         Returns:
             Dictionary mapping (seed, thermoIx) -> (hist, bin_edges)
         '''
