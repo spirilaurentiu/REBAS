@@ -91,16 +91,14 @@ class REXFNManager:
     #
 
     # Write restart files into self.dir/restDir/restDir.<seed>
-    def write_restarts_from_trajectories(self, restDir, topology, out_ext='rst7'):
+    def write_restarts_from_trajectories(self, restDir, topology, out_ext='rst7', dry=False):
         """ Read trajectory files of the form <mol>_<seed>.<replica>.dcd from self.dir,
         extract the last frame, and write restart files into self.dir/restDir/restDir.<seed>.
-
         Arguments:
             restDir : Name of the subdirectory (inside self.dir) to store restart files
             topology: Path to a topology file (AMBER prmtop or PDB) required to read the DCDs
             out_ext : Output extension/format. 'rst7' (default) requires ParmEd; if
                       ParmEd is unavailable, a PDB will be written instead.
-
         Output:
             For each trajectory file <mol>_<seed>.<replica>.dcd, writes:
                 self.dir/restDir/restDir.<seed>/<mol>_<seed>.<replica>.<out_ext>
@@ -128,7 +126,8 @@ class REXFNManager:
 
             # Create per-seed subdirectory: restDir/restDir.<seed>
             seed_dir = os.path.join(self.dir, restDir, f"{restDir}.{seed}")
-            os.makedirs(seed_dir, exist_ok=True)
+            if not dry:
+                os.makedirs(seed_dir, exist_ok=True)
 
             try:
                 # Load trajectory with topology
@@ -153,15 +152,15 @@ class REXFNManager:
                         struct.box = lengths + angles
 
                     out_path = os.path.join(seed_dir, f"ligand.s{replica}.rst7")
-                    struct.save(out_path, overwrite=True)
+                    if not dry: struct.save(out_path, overwrite=True)
 
                 elif ext == 'pdb':
                     out_path = os.path.join(seed_dir, f"ligand.s{replica}.pdb")
-                    last.save_pdb(out_path)
+                    if not dry: last.save_pdb(out_path)
 
                 else:
                     out_path = os.path.join(seed_dir, f"ligand.s{replica}.pdb")
-                    last.save_pdb(out_path)
+                    if not dry: last.save_pdb(out_path)
 
                 print(f"Wrote restart: {out_path}")
 
@@ -176,25 +175,33 @@ class REXFNManager:
 
 # Parse a set of filters given as arguments in the format: ---filterBy col=val
 def parse_filters(filters):
-    """ Convert list of 'col=value' strings into a dict
+    """ Convert list of 'col=value' strings into a dict.
+        Supports multiple OR values separated by commas, e.g. 'wIx=0,1'
     """
     filter_dict = {}
     for currFilter in filters:
-
         if '=' not in currFilter:
-            raise ValueError(f"Invalid filter format: '{currFilter}' (expected col=value)")
-        
-        key, val = currFilter.split('=', 1)
+            raise ValueError(f"Invalid filter format: '{currFilter}' (expected col=value or col=val1,val2,...)")
 
-        try:
-            val = int(val)
-        except ValueError:
+        key, val_str = currFilter.split('=', 1)
+
+        # Split on commas to allow OR logic
+        vals = val_str.split(',')
+
+        parsed_vals = []
+        for v in vals:
+            v = v.strip()
             try:
-                val = float(val)
+                v = int(v)
             except ValueError:
-                pass  # Leave as string
+                try:
+                    v = float(v)
+                except ValueError:
+                    pass  # leave as string
+            parsed_vals.append(v)
 
-        filter_dict[key] = val
+        # Store single values as scalar, multi as list
+        filter_dict[key] = parsed_vals if len(parsed_vals) > 1 else parsed_vals[0]
 
     return filter_dict
 #
@@ -272,7 +279,7 @@ def plot_histogram(hist_dict, title="title", xlabel="x", ylabel="Density", save_
     plt.close()
 #
 
-# MAIN function for the REBAS paper. Has two types of calculations:
+#region MAIN function for the REBAS paper. Has two types of calculations:
 #   (I)   In-house checks
 #   (II)  Figures for the paper
 # Types of files:
@@ -285,6 +292,7 @@ def plot_histogram(hist_dict, title="title", xlabel="x", ylabel="Density", save_
 #   2) Efficiency figures
 #       2.1) Exchange rates
 #       2.2) Autocorrelation-based functions
+#endregion
 def main(args):
 
     OUTPUT_REQUIRED, TRAJECTORY_REQUIRED = True, False # flags
@@ -311,7 +319,10 @@ def main(args):
         for col, val in filters.items():
             if col not in out_df.columns:
                 raise ValueError(f"Filter column '{col}' not found in DataFrame columns.")
-            out_df = out_df[out_df[col] == val]
+            if isinstance(val, list):  # multiple OR values
+                out_df = out_df[out_df[col].isin(val)]
+            else:  # single value
+                out_df = out_df[out_df[col] == val]
 
     print(out_df)
     #endregion
@@ -319,7 +330,8 @@ def main(args):
     #region Restart: write restart files into self.dir/restDir/restDir.<seed>
     if (args.restDir):
         TRAJECTORY_REQUIRED = True
-        FNManager.write_restarts_from_trajectories(args.restDir, args.topology)
+        FNManager = REXFNManager(args.dir, args.inFNRoots, args.cols)
+        FNManager.write_restarts_from_trajectories(args.restDir, args.topology, dry=args.dry)
     #endregion
 
     #region In-house basic checks
@@ -391,19 +403,14 @@ def main(args):
         print(tau_df)
     #endregion  
 
-
-    if TRAJECTORY_REQUIRED:
-        FNManager = REXFNManager(args.dir, args.inFNRoots, args.cols)
-        
-        FNManager.write_restarts_from_trajectories(args.restDir, args.topology)
-
 #endregion --------------------------------------------------------------------
 
 if __name__ == "__main__":
+
+    #region Parse arguments
     parser = argparse.ArgumentParser()
     parser.add_argument('--dir', required=True, help='Directory with data files')
     parser.add_argument('--inFNRoots', nargs='+', required=True, help='Robosample processed output file names')
-    parser.add_argument('--restDir', help='Directory where restart files are put')
     parser.add_argument('--topology', help='Topology file')
     parser.add_argument('--cols', nargs='+', help='Columns to be read')
     parser.add_argument('--filterBy', nargs='*', default=[], help='Optional filters in the format col=value (e.g. wIx=0)')
@@ -411,13 +418,15 @@ if __name__ == "__main__":
     parser.add_argument('--writeCache', action='store_true', help='Write new cache file (fails if file exists)')
     parser.add_argument('--cacheFile', default='rex_cache.pkl', help='Path to cache file')
 
-    #parser.add_argument('--xxx', action='store_true', default=False, help='xxx')
+    parser.add_argument('--restDir', help='Directory where restart files are put')
+    parser.add_argument('--dry', action='store_true', default=False, help="No actions, just print.")
+
     parser.add_argument('--basicChecks', nargs='+', default=[], help='Checks: <col>')
     parser.add_argument('--checks', nargs='+', default=[], help='Checks: acceptance, dpe')
 
-
     parser.add_argument('--figures', nargs='+', default=[], type=str, help='Figures: tau_ac, potentialEnergyDistrib')
     args = parser.parse_args()
+    #endregion
 
     main(args)
 
