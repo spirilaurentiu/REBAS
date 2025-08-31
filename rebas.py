@@ -8,7 +8,7 @@ import pandas as pd
 import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
-matplotlib.use('Agg')
+#matplotlib.use('Agg')
 
 from rex_data import REXData
 from rex_efficiency import RoboAnalysis, REXEfficiency
@@ -41,6 +41,7 @@ class REXFNManager:
         self.SELECTED_COLUMNS = SELECTED_COLUMNS
     #
 
+    # Get seed and simulation type from filename
     def getSeedAndTypeFromFN(self, FN):
         """ Parse filename of type out.<7-digit seed>
         """
@@ -52,6 +53,7 @@ class REXFNManager:
         return seed, sim_type
     #
 
+    # Read data from a single file
     def getDataFromFile(self, FN, seed, sim_type):
         """ Read data from file
         """
@@ -62,6 +64,7 @@ class REXFNManager:
         return df
     #
 
+    # Read data from all files
     def getDataFromAllFiles(self):
         """ Grab all files and read data from them
         """
@@ -207,7 +210,7 @@ def parse_filters(filters):
 #
 
 # Generic plotting function for timelines
-def plot_column(df, col, save_path=None):
+def plot1D(df, col, save_path=None):
     """ Plot values of a single column in the order they appear in the DataFrame.
     Arguments:
         df : DataFrame
@@ -229,6 +232,32 @@ def plot_column(df, col, save_path=None):
     plt.xlabel("Index")
     plt.ylabel(col)
     plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+
+    if save_path:
+        plt.savefig(save_path)
+    else:
+        plt.show()
+#
+
+# Generic plotting function for 2D scatters
+def plot2D(df, xcol, ycol, save_path=None):
+    """ Plot values of two columns against each other in a scatter plot.
+    Arguments:
+        df : DataFrame
+        xcol : column name for x-axis
+        ycol : column name for y-axis
+        save_path : optional, if given save plot to file
+    """
+    if xcol not in df.columns or ycol not in df.columns:
+        raise ValueError(f"Columns '{xcol}' or '{ycol}' not found in DataFrame.")
+
+    plt.figure()
+    plt.scatter(df[xcol], df[ycol], alpha=0.7)
+    plt.title(f"Scatter plot of {ycol} vs {xcol}")
+    plt.xlabel(xcol)
+    plt.ylabel(ycol)
     plt.grid(True)
     plt.tight_layout()
 
@@ -351,7 +380,7 @@ def main(args):
                 plot_histogram(hist_df, save_path=save_path)
             else:
                 save_path = f"check_{column}.png"
-                plot_column(out_df, column, save_path=save_path)
+                plot1D(out_df, column, save_path=save_path)
     #endregion
 
     #region In-house other checks
@@ -367,18 +396,37 @@ def main(args):
     # Delta potential energy
     if 'dpe' in args.checks:
         roboAna = RoboAnalysis(out_df)
-        dpeHist_df = roboAna.delta_pe_histograms(bins=50)
-        plot_histogram(dpeHist_df, save_path=f"check_dpe_hist.png")
+
+        grouped = roboAna.df.groupby(['thermoIx', 'sim_type', 'seed'])
+
+        for (thermoIx, sim_type, seed), group in grouped:
+            plt.figure(figsize=(8, 4))
+            # compute delta PE
+            for exchangeDirection in [0, 1]:
+                delta_pe = (group['pe_n'] - group['pe_o'])[exchangeDirection:1000][::2]
+
+                plt.plot(delta_pe.values, marker='.', linestyle='-', alpha=0.7)
+
+                plt.title(f"ΔE = pe_n - pe_o (thermoIx={thermoIx}, sim_type={sim_type}, seed={seed})")
+                plt.xlabel("Index")
+                plt.ylabel("ΔE")
+                plt.grid(True)
+
+                plt.tight_layout()
+            plt.show()
+
+        #dpeHist_df = roboAna.delta_pe_histograms(bins=50)
+        ##plot_histogram(dpeHist_df, save_path=f"check_dpe_hist.png")
+        #plot_histogram(dpeHist_df)
     #endregion
-
-
 
     #region Paper figures: Validation
     if "pe_o" in args.figures:
         roboAna = RoboAnalysis(out_df)
 
-        hist_df = roboAna.column_histograms(bins=50)
-        plot_histogram(hist_df, save_path="x.png")
+        hist_df = roboAna.column_histograms('pe_o', bins=500)
+        #plot_histogram(hist_df, save_path="x.png")
+        plot_histogram(hist_df)
     #endregion
 
     #region Paper figures: Efficiency
@@ -387,8 +435,9 @@ def main(args):
         rexEff = REXEfficiency(out_df)
 
         # Calculate exchange rate
-        exch_df = rexEff.calc_exchange_rates()
-        print("Exchange rates")
+        burnin = 100
+        exch_df = rexEff.calc_exchange_rates(burnin=burnin)
+        print("Exchange rates at burnin", burnin)
         print(exch_df)
 
         # Calculate autocorrelation function
@@ -401,7 +450,13 @@ def main(args):
 
         tau_df = rexEff.compute_autocorrelation_time(max_lag) # total autocorrelation time
         print(tau_df)
-    #endregion  
+
+        tau2_df = rexEff.compute_tau2() # relaxation time
+        print(tau2_df)
+
+        tau_p_df = rexEff.compute_tau_p() # MFPT
+        print(tau_p_df)
+    #endregion
 
 #endregion --------------------------------------------------------------------
 

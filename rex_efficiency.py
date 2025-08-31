@@ -15,12 +15,18 @@ class REXEfficiency:
         self.df = df
     #
 
+    def get_dataframe(self):
+        return self.df
+    #
+
+    # Basic summary statistics
     def summary_stats(self):
         ''' Return basic summary statistics of numeric columns '''
         return self.df.describe(include='all')
     #
 
-    def calc_exchange_rates(self):
+    # Calculate exchange rates for each replica
+    def calc_exchange_rates(self, burnin=1000):
         ''' Calculate exchange rates for each replica.
         Exchange rate is defined as the fraction of times a replica changes its thermoIx.
 
@@ -36,8 +42,6 @@ class REXEfficiency:
         results = []
         grouped = self.df.groupby(['replicaIx', 'sim_type', 'seed'])
 
-
-        burnin = 1000
 
         for (replica, sim_type, seed), group in grouped:
             thermo_series = group['thermoIx'].values
@@ -63,6 +67,7 @@ class REXEfficiency:
         return pd.DataFrame(results)
     #
 
+    # Compute C_k(t) for each replica
     def compute_autocorrelation(self, max_lag):
         ''' Compute autocorrelation function C_k(t) for each replica up to max_lag.
 
@@ -105,6 +110,7 @@ class REXEfficiency:
         return pd.DataFrame(results)
     #
 
+    # Compute the average autocorrelation C(t) for each 
     def compute_mean_autocorrelation(self, max_lag):
         ''' Compute the average autocorrelation C(t) over all replicas:
 
@@ -125,6 +131,7 @@ class REXEfficiency:
         return grouped
     #
 
+    # Compute the integrated autocorrelation time τ_ac per seed
     def compute_autocorrelation_time(self, max_lag):
         ''' Compute the integrated autocorrelation time τ_ac per seed:
 
@@ -147,7 +154,113 @@ class REXEfficiency:
             grouped.append({'seed': seed, 'autocorrelation_time': tau_ac})
 
         return pd.DataFrame(grouped)
-    #     
+    # 
+
+    def compute_tau2(self):
+        """Estimate relaxation time tau_2 from the empirical transition matrix.
+
+        Returns:
+            DataFrame with columns:
+                - seed
+                - tau_2
+                - mu2 (second-largest eigenvalue)
+        """
+        results = []
+
+        grouped = self.df.groupby("seed")
+        for seed, group in grouped:
+            states = group["thermoIx"].values
+            K = states.max() + 1  # assuming thermoIx runs from 0..K-1
+
+            # Build count matrix Nij
+            Nij = np.zeros((K, K), dtype=int)
+            for i in range(len(states) - 1):
+                a, b = states[i], states[i+1]
+                Nij[a, b] += 1
+
+            # Symmetrize
+            T = np.zeros((K, K), dtype=float)
+            for i in range(K):
+                denom = sum(Nij[i, k] + Nij[k, i] for k in range(K))
+                if denom > 0:
+                    for j in range(K):
+                        T[i, j] = (Nij[i, j] + Nij[j, i]) / denom
+
+            # Diagonalize
+            eigvals = np.linalg.eigvals(T)
+            eigvals = np.real(eigvals)  # should be real for stochastic T
+            eigvals = np.sort(eigvals)[::-1]  # descending order
+
+            mu2 = eigvals[1] if len(eigvals) > 1 else np.nan
+            tau2 = 1.0 / (1.0 - mu2) if mu2 < 1 else np.inf
+
+            results.append({
+                "seed": seed,
+                "mu2": mu2,
+                "tau_2": tau2
+            })
+
+        return pd.DataFrame(results)
+    
+    def compute_tau_p(self):
+        """Estimate mean first-passage time τ_p from thermoIx trajectories.
+
+        τ_p = mean number of exchanges required for a replica to go from state 1 to K.
+
+        Returns:
+            DataFrame with columns:
+                - seed
+                - tau_p
+        """
+        results = []
+
+        grouped = self.df.groupby("seed")
+        for seed, group in grouped:
+            states = group["thermoIx"].values
+            unique_states = np.unique(states)
+            K = len(unique_states)
+
+            # Map states to 0..K-1 in case thermoIx is not contiguous
+            state_map = {s: i for i, s in enumerate(sorted(unique_states))}
+            states = np.array([state_map[s] for s in states])
+
+            # Build Nij
+            Nij = np.zeros((K, K), dtype=int)
+            for i in range(len(states) - 1):
+                a, b = states[i], states[i+1]
+                Nij[a, b] += 1
+
+            # Symmetrize
+            T = np.zeros((K, K), dtype=float)
+            for i in range(K):
+                denom = sum(Nij[i, k] + Nij[k, i] for k in range(K))
+                if denom > 0:
+                    for j in range(K):
+                        T[i, j] = (Nij[i, j] + Nij[j, i]) / denom
+
+            # Build absorbing Markov chain T'
+            Tprime = T.copy()
+            Tprime[K-1, :] = 0.0
+            Tprime[K-1, K-1] = 1.0
+
+            # Q = top-left (K-1)x(K-1)
+            Q = Tprime[:K-1, :K-1]
+
+            # Fundamental matrix
+            I = np.eye(K-1)
+            try:
+                U = np.linalg.inv(I - Q)
+            except np.linalg.LinAlgError:
+                results.append({"seed": seed, "tau_p": np.inf})
+                continue
+
+            # MFPT from state 1 → K (state index 0-based)
+            tau_p = U[0, :].sum()
+
+            results.append({"seed": seed, "tau_p": tau_p})
+
+        return pd.DataFrame(results)    
+         
 #endregion --------------------------------------------------------------------
 
 
@@ -161,6 +274,10 @@ class RoboAnalysis:
     """
     def __init__(self, df):
         self.df = df
+    #
+
+    def get_dataframe(self):
+        return self.df
     #
 
     # Calculate acceptance rates for one simulation
