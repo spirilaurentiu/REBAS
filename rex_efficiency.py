@@ -7,7 +7,6 @@ import numpy as np
 #region REXEfficiency ----------------------------------------------------------
 class REXEfficiency:
     ''' REXEfficiency provides analysis routines for REX simulation data.
-
     Attributes:
         df: The DataFrame containing simulation data
     '''
@@ -26,10 +25,9 @@ class REXEfficiency:
     #
 
     # Calculate exchange rates for each replica
-    def calc_exchange_rates(self, burnin=1000):
+    def calc_exchange_rates(self, burnin=1024): # 
         ''' Calculate exchange rates for each replica.
         Exchange rate is defined as the fraction of times a replica changes its thermoIx.
-
         Returns:
             A DataFrame with columns:
                 - replicaIx
@@ -41,7 +39,6 @@ class REXEfficiency:
         '''
         results = []
         grouped = self.df.groupby(['replicaIx', 'sim_type', 'seed'])
-
 
         for (replica, sim_type, seed), group in grouped:
             thermo_series = group['thermoIx'].values
@@ -185,6 +182,14 @@ class REXEfficiency:
                 if denom > 0:
                     for j in range(K):
                         T[i, j] = (Nij[i, j] + Nij[j, i]) / denom
+
+            # Print the transition matrix
+            print("\nEmpirical transition matrix for seed ", seed)
+            for i in range(K):
+                for j in range(K):
+                    print(T[i, j], end = ' ')
+                print()
+            print()
 
             # Diagonalize
             eigvals = np.linalg.eigvals(T)

@@ -8,10 +8,11 @@ import pandas as pd
 import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
-#matplotlib.use('Agg')
+matplotlib.use('Agg')
 
 from rex_data import REXData
 from rex_efficiency import RoboAnalysis, REXEfficiency
+from rex_trajdata import REXTrajData
 
 
 
@@ -45,28 +46,47 @@ class REXFNManager:
     def getSeedAndTypeFromFN(self, FN):
         """ Parse filename of type out.<7-digit seed>
         """
-        match = re.match(r"out\.(\d{7})", FN)
-        if not match: raise ValueError(f"Filename '{FN}' does not match expected format 'out.<7-digit-seed>'")
 
-        seed = match.group(1)
-        sim_type = seed[2]  # third digit (0-based index)
+        seed, sim_type = -1, -1
+
+        if FN.startswith("out."):
+            match = re.match(r"out\.(\d{7})", FN)
+            if not match: raise ValueError(f"Filename '{FN}' does not match expected format 'out.<7-digit-seed>'")
+
+            seed = match.group(1)
+            sim_type = seed[2]  # third digit (0-based index)
+
+        elif FN.endswith(".dcd"):
+            pattern = r"([A-Za-z0-9]+)_(\d{7})\.repl\d+\.dcd$"
+            match = re.match(pattern, FN)
+            if not match:
+                raise ValueError(f"Filename '{FN}' does not match expected format'<name_of_the_molecule>_<7-digit-seed>.repl<index>.dcd'")
+
+            seed = match.group(1)
+            sim_type = seed[2]   # third digit
+
         return seed, sim_type
     #
 
     # Read data from a single file
-    def getDataFromFile(self, FN, seed, sim_type):
+    def getDataFromFile(self, FN, seed, sim_type, burnin=0):
         """ Read data from file
         """
         rex = REXData(FN, self.SELECTED_COLUMNS)
         df = rex.get_dataframe().copy()
         df['seed'] = seed
         df['sim_type'] = sim_type
+
+        # Remove burn-in rows
+        if burnin > 0:
+            df = df.iloc[burnin:].reset_index(drop=True)
+
         return df
     #
 
     # Read data from all files
-    def getDataFromAllFiles(self):
-        """ Grab all files and read data from them
+    def getDataFromAllFiles(self, burnin=0):
+        """ Grab all out files and read data from them
         """
         all_data = []
         for FNRoot in self.FNRoots:
@@ -85,12 +105,29 @@ class REXFNManager:
                     print(f"Skipping file due to naming error: {filepath}\n{e}", file=sys.stderr)
                     continue
 
-                df = self.getDataFromFile(filepath, seed, sim_type)
+                df = self.getDataFromFile(filepath, seed, sim_type, burnin=burnin)
                 all_data.append(df)
 
                 print("done.", flush=True)
 
         return pd.concat(all_data, ignore_index=True) if all_data else pd.DataFrame()
+    #
+
+    # Get trajectory data from a single trajectory file
+    def getTrajDataFromFile(self, FN, seed, sim_type, burnin=0):
+        """ Read trajectory data from file
+        """        
+        trajData = REXTrajData(FN)
+        df = trajData.get_dataframe().copy()
+        df['seed'] = seed
+        df['sim_type'] = sim_type        
+    #
+
+    # Get trajectory data from all files
+    def getTrajDataFromAllFiles(self, burnin=0):
+        """ Grab all dcd files and read data from them
+        """        
+        pass
     #
 
     # Write restart files into self.dir/restDir/restDir.<seed>
@@ -286,7 +323,7 @@ def plot_histogram(hist_dict, title="title", xlabel="x", ylabel="Density", save_
     plt.figure(figsize=(8, 6))
     colors = [
         "blue", "red", "black", "grey", "green",
-        "brown", "cyan", "purple", "yellow", "pink"
+        "brown", "cyan", "purple", "yellow"#, "pink"
     ]
 
     for idx, (key, (hist, bin_edges)) in enumerate(hist_dict.items()):
@@ -328,13 +365,15 @@ def main(args):
     FNManager = None # classes
     out_df, traj_df = None, None # pandas
 
+    GLOBAL_BURNIN = 1000
+
     #region Read output from all files
     if args.useCache and os.path.exists(args.cacheFile):
         print(f"Loading data from cache: {args.cacheFile}")
         out_df = pd.read_pickle(args.cacheFile)
     else:
         FNManager = REXFNManager(args.dir, args.inFNRoots, args.cols)
-        out_df = FNManager.getDataFromAllFiles()
+        out_df = FNManager.getDataFromAllFiles(burnin = GLOBAL_BURNIN)
 
         if args.writeCache:
             if os.path.exists(args.cacheFile):
@@ -353,7 +392,28 @@ def main(args):
             else:  # single value
                 out_df = out_df[out_df[col] == val]
 
-    print(out_df)
+    # ============ PANDAS DOCUMENTATION ============
+    # dataframe: two-dimensional, size-mutable, potentially heterogeneous tabular data
+    # grouped: pandas.core.groupby.DataFrameGroupBy object = lazy grouping object - essentially a recipe for how the DataFrame should be grouped
+    # group: a tuple (name, dataframe)
+
+    #region Panda_Study
+    # print("out_df:\n", out_df)
+    # grouped = out_df.groupby(['replicaIx'])
+    # print("\n\nout_df.groupby(['replicaIx']):\n")
+    # for name, df in grouped:
+    #     print("Group:", name)
+    #     print(df)
+    # print("\n\nout_df.info:\n", out_df.info())
+    # print("\n\nout_df.index:\n", out_df.index)
+    # print("\nout_df.columns:\n", out_df.columns)
+    # print("\nout_df.dtypes:\n", out_df.dtypes)
+    # print("out_df.axes:\n", out_df.axes)
+    # print("\n\nout_df.keys():\n", out_df.keys())
+    # print('\n\nout_df.get("pe_o"):\n', out_df.get("pe_o"))
+    # print('\n\nout_df.get("pe_o").to_numpy():\n', out_df.get("pe_o").to_numpy())
+    #endregion Panda_Study
+
     #endregion
 
     #region Restart: write restart files into self.dir/restDir/restDir.<seed>
@@ -422,11 +482,90 @@ def main(args):
 
     #region Paper figures: Validation
     if "pe_o" in args.figures:
-        roboAna = RoboAnalysis(out_df)
 
-        hist_df = roboAna.column_histograms('pe_o', bins=500)
-        #plot_histogram(hist_df, save_path="x.png")
-        plot_histogram(hist_df)
+        # roboAna = RoboAnalysis(out_df)
+        # hist_df = roboAna.column_histograms('pe_o', bins=5)
+        # print("hist_df pandas", pd.DataFrame(hist_df))
+        # print("hist_df.values", hist_df.values())
+        # plot_histogram(hist_df, save_path="x.png")
+        # plot_histogram(hist_df)
+
+        # consistent bins across all groups
+        col_clean = out_df['pe_o'].dropna()
+        lower_percentile = 0.005
+        upper_percentile = 99.995
+        nbins = 100
+
+        vmin = np.percentile(col_clean, lower_percentile)
+        vmax = np.percentile(col_clean, upper_percentile)
+        bin_edges = np.linspace(vmin, vmax, nbins + 1)
+        bin_centers = 0.5 * (bin_edges[:-1] + bin_edges[1:])
+
+        # dictionary to hold histograms per (sim_type, thermoIx)
+        histograms_by_type_thermo = {}
+
+        # loop over sim_type and thermoIx
+        for (sim_type, thermoIx), subdf_group in out_df.groupby(["sim_type", "thermoIx"]):
+            # list to store densities across seeds
+            seed_densities = []
+            
+            # loop over seeds for this sim_type and thermoIx
+            for seed, subdf in subdf_group.groupby("seed"):
+                counts, _ = np.histogram(subdf["pe_o"], bins=bin_edges)
+                densities = counts / counts.sum() if counts.sum() > 0 else counts
+                seed_densities.append(densities)
+            
+            density_array = np.array(seed_densities)
+            avg_density = np.mean(density_array, axis=0)
+            std_density = np.std(density_array, axis=0)
+            
+            histograms_by_type_thermo[(sim_type, thermoIx)] = {
+                "avg_density": avg_density,
+                "std_density": std_density,
+                "bin_edges": bin_edges
+            }
+                
+
+        # ---- Plot ----
+        plt.figure(figsize=(10, 6))
+
+        colors = [
+            "blue", "red", "black", "grey", "green",
+            "brown", "cyan", "purple", "yellow", "pink"
+        ]
+        colors = [
+            "black", "maroon", "red", "orange", "yellow", "green", "cyan", "blue", "violet",
+        ]
+
+        for (sim_type, thermoIx), data in histograms_by_type_thermo.items():
+            plt.errorbar(
+                bin_centers, 
+                data["avg_density"], 
+                yerr=data["std_density"],
+                color=colors[thermoIx],
+                #fmt="-o", 
+                capsize=3,
+                label=f"type {sim_type}, thermo {thermoIx}"
+            )
+        plt.xlabel("pe_o")
+        plt.ylabel("Density ± std (across seeds)")
+        plt.title("Histogram densities of pe_o by sim_type and thermoIx")
+        plt.legend()
+        plt.tight_layout()
+        plt.savefig("peo_density_by_type_thermo.png", dpi=300)
+        plt.close()
+
+        plt.figure(figsize=(10, 6))
+        for seed, subdf in subdf_group.groupby("seed"):
+            data = subdf["pe_o"].to_numpy()
+            plt.plot(data, label=seed)
+        plt.ylabel("pe_o")
+        plt.title("Timesesries of pe_o by seed")
+        plt.legend()
+        plt.tight_layout()
+        plt.savefig("peo_tseries_by_type_thermo.png", dpi=300)
+        plt.close()
+
     #endregion
 
     #region Paper figures: Efficiency
@@ -435,27 +574,23 @@ def main(args):
         rexEff = REXEfficiency(out_df)
 
         # Calculate exchange rate
-        burnin = 100
+        burnin = 1024
         exch_df = rexEff.calc_exchange_rates(burnin=burnin)
         print("Exchange rates at burnin", burnin)
         print(exch_df)
 
-        # Calculate autocorrelation function
-        max_lag = 50
-        acorCk_df = rexEff.compute_autocorrelation(max_lag) # per replica
-        #print(acorCk_df)
-
-        acorC_df = rexEff.compute_mean_autocorrelation(max_lag) # total
-        #print(acorC_df)
-
-        tau_df = rexEff.compute_autocorrelation_time(max_lag) # total autocorrelation time
-        print(tau_df)
-
-        tau2_df = rexEff.compute_tau2() # relaxation time
-        print(tau2_df)
-
-        tau_p_df = rexEff.compute_tau_p() # MFPT
-        print(tau_p_df)
+        # # Calculate autocorrelation function
+        # max_lag = 50
+        # acorCk_df = rexEff.compute_autocorrelation(max_lag) # per replica
+        # #print(acorCk_df)
+        # acorC_df = rexEff.compute_mean_autocorrelation(max_lag) # total
+        # #print(acorC_df)
+        # tau_df = rexEff.compute_autocorrelation_time(max_lag) # total autocorrelation time
+        # print(tau_df)
+        # tau2_df = rexEff.compute_tau2() # relaxation time
+        # print(tau2_df)
+        # tau_p_df = rexEff.compute_tau_p() # MFPT
+        # print(tau_p_df)
     #endregion
 
 #endregion --------------------------------------------------------------------
