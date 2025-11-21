@@ -1,6 +1,7 @@
 # rex_validator.py
 import pandas as pd
 import numpy as np
+from scipy.optimize import curve_fit
 
 # -----------------------------------------------------------------------------
 #                      Robosample efficiency estimator
@@ -67,12 +68,9 @@ class REXEfficiency:
     # Compute C_k(t) for each replica
     def compute_autocorrelation(self, max_lag):
         ''' Compute autocorrelation function C_k(t) for each replica up to max_lag.
-
         C_k(t) = (<M_k(s) M_k(s + t)> - <M_k(s)>^2) / (<M_k(s)^2> - <M_k(s)>^2)
-
         Arguments:
             max_lag: Maximum time lag (t) to compute autocorrelation for
-
         Returns:
             A DataFrame with columns:
                 - replicaIx
@@ -83,7 +81,6 @@ class REXEfficiency:
         '''
         results = []
         grouped = self.df.groupby(['replicaIx', 'sim_type', 'seed'])
-
         for (replica, sim_type, seed), group in grouped:
             M = group['thermoIx'].values
             M = M - np.mean(M)
@@ -107,15 +104,30 @@ class REXEfficiency:
         return pd.DataFrame(results)
     #
 
+    # region myverification
+    # def compute_autocorrelation_me(self, max_lag):
+    #     grouped = self.df.groupby(['replicaIx', 'sim_type', 'seed'])
+    #     for (replica, sim_type, seed), group in grouped:
+    #         print(group)
+    #         print(group["thermoIx"])
+    #         M_k_s = group["thermoIx"].values
+    #         miu = np.mean(M_k_s) # mean
+    #         miumiu = miu * miu # square mean
+    #         miu_2 = np.mean(M_k_s**2) # second moment
+    #         q_term = np.empty(max_lag) * np.nan
+    #         C_k_t = np.empty(max_lag) * np.nan
+    #         for lag in range(1, max_lag + 1):
+    #             q_term[lag-1] = np.mean(M_k_s[:-lag] * M_k_s[lag:])
+    #             C_k_t[lag-1] = (q_term[lag-1] - miumiu) / (miu_2 - miumiu)
+    #         return C_k_t
+    # endregion myverification
+
     # Compute the average autocorrelation C(t) for each 
     def compute_mean_autocorrelation(self, max_lag):
         ''' Compute the average autocorrelation C(t) over all replicas:
-
         C(t) = (1/K) * sum_k C_k(t)
-
         Arguments:
             max_lag: Maximum lag to compute C(t)
-
         Returns:
             A DataFrame with columns:
                 - seed
@@ -123,26 +135,49 @@ class REXEfficiency:
                 - mean_autocorrelation
         '''
         per_replica = self.compute_autocorrelation(max_lag)
+
+        # region study
+        # print("per_replica\n", per_replica)
+        # grouped_obj = per_replica.groupby(['seed', 'lag'])
+        # for group in grouped_obj:
+        #     print("grouped_obj group\n", group)
+        # autocorr_groups = grouped_obj['autocorrelation']
+        # for group in autocorr_groups:
+        #     print("autocorr_groups group\n", group)
+        # endregion study
+
         grouped = per_replica.groupby(['seed', 'lag'])['autocorrelation'].mean().reset_index()
         grouped.rename(columns={'autocorrelation': 'mean_autocorrelation'}, inplace=True)
         return grouped
     #
 
+    def exp_func(self, t, tau, C0=1.0):
+        return C0 * np.exp(-t / tau)
+        
     # Compute the integrated autocorrelation time τ_ac per seed
     def compute_autocorrelation_time(self, max_lag):
         ''' Compute the integrated autocorrelation time τ_ac per seed:
-
         τ_ac = sum_{t=1}^{T} [1 - (t / T)] * C(t)
-
         Arguments:
             max_lag: Maximum lag (T) to use in the summation
-
         Returns:
             A DataFrame with columns:
                 - seed
                 - autocorrelation_time
         '''
         mean_corr = self.compute_mean_autocorrelation(max_lag)
+
+        # Fit on an exponential?
+        lags = mean_corr['lag'].values          # t
+        C_t = mean_corr['mean_autocorrelation'].values  # C(t)
+        max_fit_lag = int((100.0/100.0) * max_lag)
+        lags_fit = lags[:max_fit_lag]
+        C_t_fit = C_t[:max_fit_lag]
+        tau_guess = 10  
+        popt, pcov = curve_fit(self.exp_func, lags_fit, C_t_fit, p0=[tau_guess])
+        tau_fit = popt[0]
+        print(f"Fitted autocorrelation time tau = {tau_fit:.2f}")
+
         T = max_lag
         grouped = []
 

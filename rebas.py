@@ -573,20 +573,53 @@ def main(args):
 
         rexEff = REXEfficiency(out_df)
 
+        grouped = out_df.groupby('replicaIx')
+        num_replicas = len(grouped)
+
         # Calculate exchange rate
         burnin = 1024
-        exch_df = rexEff.calc_exchange_rates(burnin=burnin)
-        print("Exchange rates at burnin", burnin)
-        print(exch_df)
 
-        # # Calculate autocorrelation function
-        # max_lag = 50
-        # acorCk_df = rexEff.compute_autocorrelation(max_lag) # per replica
-        # #print(acorCk_df)
-        # acorC_df = rexEff.compute_mean_autocorrelation(max_lag) # total
-        # #print(acorC_df)
-        # tau_df = rexEff.compute_autocorrelation_time(max_lag) # total autocorrelation time
-        # print(tau_df)
+        # exch_df = rexEff.calc_exchange_rates(burnin=burnin)
+        # print("Exchange rates at burnin", burnin)
+        # print(exch_df)
+
+        # Calculate autocorrelation function
+        max_lag = 100
+
+        # C_k_t_df = rexEff.compute_autocorrelation(max_lag) # per replica
+        # colors = ["black", "maroon", "red", "orange", "yellow", "green", "cyan", "blue", "violet",]
+        # plt.figure(figsize=(10, 6))
+        # plt.ylabel("C_k_t")
+        # plt.title("C_k_t")
+        # plt.tight_layout()
+        # subdfIx = -1
+        # for (seed, replicaIx), subdf in C_k_t_df.groupby(["seed", "replicaIx"]):
+        #     subdfIx += 1
+        #     C_k_t = subdf[("autocorrelation")].values
+        #     plt.plot(C_k_t, color=colors[subdfIx // num_replicas], label=seed)
+        # plt.legend()
+        # plt.savefig("C_k_t.png", dpi=300)
+        # plt.close()
+
+        C_t_df = rexEff.compute_mean_autocorrelation(max_lag) # mean among the replicas
+
+        colors = ["black", "maroon", "red", "orange", "yellow", "green", "cyan", "blue", "violet",]
+        plt.figure(figsize=(10, 6))
+        plt.ylabel("C_t")
+        plt.title("C_t")
+        plt.tight_layout()
+        subdfIx = -1
+        for (seed), subdf in C_t_df.groupby([("seed")]):
+            subdfIx += 1
+            C_t = subdf[("mean_autocorrelation")].values
+            plt.plot(C_t, color=colors[subdfIx], label=seed)
+        plt.legend()
+        plt.savefig("C_t.png", dpi=300)
+        plt.close()
+
+        tau_df = rexEff.compute_autocorrelation_time(max_lag) # total autocorrelation time
+        print(tau_df)
+
         # tau2_df = rexEff.compute_tau2() # relaxation time
         # print(tau2_df)
         # tau_p_df = rexEff.compute_tau_p() # MFPT
