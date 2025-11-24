@@ -1,30 +1,29 @@
 # rex_trajdata.py
 import pandas as pd
 import sys
+import mdtraj as md
 
 # -----------------------------------------------------------------------------
 #                      Robosample trajectory reader
 #region REXTrajData ---------------------------------------------------------------
 class REXTrajData:
-    ''' Read Robosample trajectory data from a file '''
-    def __init__(self, filepath):
-        self.filepath = filepath
-        self.df = self._load_data()
+    """Read a single DCD trajectory using MDTraj."""
 
-    def _load_data(self):
-        """ Get trajectory data from a file """
+    def __init__(self, filepath, topology="trpch/ligand.prmtop"):
+        self.filepath = filepath
+        self.topology = topology
+        self.traj = self._load_trajectory()
+
+    def _load_trajectory(self):
         try:
-            traj = md.load(self.filepath)   # Load trajectory
-            df = traj.xyz.reshape(traj.n_frames, -1)  # Example: convert coords to DataFrame-like array
-            return df
+            traj = md.load_dcd(self.filepath, top=self.topology)
+            return traj
 
         except Exception as e:
-            print(f"Error loading trajectory data from {self.filepath}: {e}", file=sys.stderr)
+            print(f"Error loading {self.filepath}: {e}", file=sys.stderr)
             raise
-    #
 
-    def get_dataframe(self):
-        return self.df
-    #
+    def get_traj(self):
+        return self.traj
 
 #endregion --------------------------------------------------------------------
