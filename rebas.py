@@ -8,12 +8,11 @@ import pandas as pd
 import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
-matplotlib.use('Agg')
+#matplotlib.use('Agg')
 
 from rex_data import REXData
 from rex_efficiency import RoboAnalysis, REXEfficiency
 from rex_trajdata import REXTrajData
-
 
 
 # -----------------------------------------------------------------------------
@@ -412,7 +411,7 @@ def plot_histogram(hist_dict, title="title", xlabel="x", ylabel="Density", save_
 #endregion
 def main(args):
 
-    OUTPUT_REQUIRED, TRAJECTORY_REQUIRED = False, True # flags
+    OUTPUT_REQUIRED, TRAJECTORY_REQUIRED = True, False # flags
     FNManager = None # classes
     out_df, traj_df = None, None # pandas
 
@@ -444,7 +443,6 @@ def main(args):
                     out_df = out_df[out_df[col].isin(val)]
                 else:  # single value
                     out_df = out_df[out_df[col] == val]
-
 
         #region Panda_Study
         # print("out_df:\n", out_df)
@@ -536,7 +534,7 @@ def main(args):
             col_clean = out_df['pe_o'].dropna()
             lower_percentile = 0.005
             upper_percentile = 99.995
-            nbins = 100
+            nbins = 300
 
             vmin = np.percentile(col_clean, lower_percentile)
             vmax = np.percentile(col_clean, upper_percentile)
@@ -576,7 +574,7 @@ def main(args):
                 "brown", "cyan", "purple", "yellow", "pink"
             ]
             colors = [
-                "black", "maroon", "red", "orange", "yellow", "green", "cyan", "blue", "violet",
+                "black", "maroon", "red", "orange", "yellow", "green", "cyan", "blue", "violet", "pink",
             ]
 
             for (sim_type, thermoIx), data in histograms_by_type_thermo.items():
@@ -584,7 +582,7 @@ def main(args):
                     bin_centers, 
                     data["avg_density"], 
                     yerr=data["std_density"],
-                    color=colors[thermoIx],
+                    color=colors[thermoIx % len(colors)],
                     #fmt="-o", 
                     capsize=3,
                     label=f"type {sim_type}, thermo {thermoIx}"
@@ -594,7 +592,8 @@ def main(args):
             plt.title("Histogram densities of pe_o by sim_type and thermoIx")
             plt.legend()
             plt.tight_layout()
-            plt.savefig("peo_density_by_type_thermo.png", dpi=300)
+            #plt.savefig("peo_density_by_type_thermo.png", dpi=300)
+            plt.show()
             plt.close()
 
             plt.figure(figsize=(10, 6))
@@ -605,7 +604,8 @@ def main(args):
             plt.title("Timesesries of pe_o by seed")
             plt.legend()
             plt.tight_layout()
-            plt.savefig("peo_tseries_by_type_thermo.png", dpi=300)
+            #plt.savefig("peo_tseries_by_type_thermo.png", dpi=300)
+            plt.show()
             plt.close()
 
         #endregion
@@ -726,8 +726,9 @@ def main(args):
         plt.grid(True)
         plt.tight_layout()
 
-        plt.savefig("rmsd_plot.png")
-        print("Saved RMSD plot to rmsd_plot.png")
+        plt.show()
+        #plt.savefig("rmsd_plot.png")
+        plt.close()
 
     #region Restart: write restart files into self.dir/restDir/restDir.<seed>
     if (args.restDir):
