@@ -412,7 +412,7 @@ def plot_histogram(hist_dict, title="title", xlabel="x", ylabel="Density", save_
 #endregion
 def main(args):
 
-    OUTPUT_REQUIRED, TRAJECTORY_REQUIRED = False, True # flags
+    OUTPUT_REQUIRED, TRAJECTORY_REQUIRED = True, False # flags
     FNManager = None # classes
     out_df, traj_df = None, None # pandas
 
@@ -572,10 +572,6 @@ def main(args):
             plt.figure(figsize=(10, 6))
 
             colors = [
-                "blue", "red", "black", "grey", "green",
-                "brown", "cyan", "purple", "yellow", "pink"
-            ]
-            colors = [
                 "black", "maroon", "red", "orange", "yellow", "green", "cyan", "blue", "violet",
             ]
 
@@ -600,7 +596,7 @@ def main(args):
             plt.figure(figsize=(10, 6))
             for seed, subdf in subdf_group.groupby("seed"):
                 data = subdf["pe_o"].to_numpy()
-                plt.plot(data, label=seed)
+                plt.plot(data, label=str(seed)+str(thermoIx))
             plt.ylabel("pe_o")
             plt.title("Timesesries of pe_o by seed")
             plt.legend()
