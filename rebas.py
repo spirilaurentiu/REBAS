@@ -15,7 +15,6 @@ from rex_efficiency import RoboAnalysis, REXEfficiency
 from rex_trajdata import REXTrajData
 
 
-
 # -----------------------------------------------------------------------------
 #                      Robosample file manager
 #region REXFileManager --------------------------------------------------------
@@ -445,7 +444,6 @@ def main(args):
                 else:  # single value
                     out_df = out_df[out_df[col] == val]
 
-
         #region Panda_Study
         # print("out_df:\n", out_df)
         # grouped = out_df.groupby(['replicaIx'])
@@ -534,9 +532,9 @@ def main(args):
 
             # consistent bins across all groups
             col_clean = out_df['pe_o'].dropna()
-            lower_percentile = 0.005
-            upper_percentile = 99.995
-            nbins = 100
+            lower_percentile = 0.2 #0.005
+            upper_percentile = 98.0 #99.995
+            nbins = 300
 
             vmin = np.percentile(col_clean, lower_percentile)
             vmax = np.percentile(col_clean, upper_percentile)
@@ -570,9 +568,8 @@ def main(args):
 
             # ---- Plot ----
             plt.figure(figsize=(10, 6))
-
             colors = [
-                "black", "maroon", "red", "orange", "yellow", "green", "cyan", "blue", "violet",
+                "black", "maroon", "red", "orange", "yellow", "green", "cyan", "blue", "violet", "pink",
             ]
 
             for (sim_type, thermoIx), data in histograms_by_type_thermo.items():
@@ -580,7 +577,7 @@ def main(args):
                     bin_centers, 
                     data["avg_density"], 
                     yerr=data["std_density"],
-                    color=colors[thermoIx],
+                    color=colors[thermoIx % len(colors)],
                     #fmt="-o", 
                     capsize=3,
                     label=f"type {sim_type}, thermo {thermoIx}"
@@ -591,6 +588,7 @@ def main(args):
             plt.legend()
             plt.tight_layout()
             plt.savefig("peo_density_by_type_thermo.png", dpi=300)
+            #plt.show()
             plt.close()
 
             plt.figure(figsize=(10, 6))
@@ -602,6 +600,7 @@ def main(args):
             plt.legend()
             plt.tight_layout()
             plt.savefig("peo_tseries_by_type_thermo.png", dpi=300)
+            #plt.show()
             plt.close()
 
         #endregion
@@ -722,8 +721,9 @@ def main(args):
         plt.grid(True)
         plt.tight_layout()
 
-        plt.savefig("rmsd_plot.png")
-        print("Saved RMSD plot to rmsd_plot.png")
+        plt.show()
+        #plt.savefig("rmsd_plot.png")
+        plt.close()
 
     #region Restart: write restart files into self.dir/restDir/restDir.<seed>
     if (args.restDir):
