@@ -2,6 +2,7 @@
 import pandas as pd
 import numpy as np
 from scipy.optimize import curve_fit
+import mdtraj as md
 
 # -----------------------------------------------------------------------------
 #                      Robosample efficiency estimator
@@ -11,18 +12,141 @@ class REXEfficiency:
     Attributes:
         df: The DataFrame containing simulation data
     '''
-    def __init__(self, df):
-        self.df = df
+    def __init__(self, out_df=None, trajectories=None, traj_metadata_df=None):
+        self.out_df = out_df
+        self.trajectories = trajectories
+        self.traj_metadata_df = traj_metadata_df
     #
 
-    def get_dataframe(self):
-        return self.df
+    def get_out_dataframe(self):
+        return self.out_df
     #
+
+    # Normalized autocorrelation function <x_t x_{t+lag}> / var
+    @staticmethod
+    def _normalized_autocorrelation(x, max_lag=None):
+        """
+        Compute the normalized autocorrelation function of a 1D array x.
+        Returns:
+            acf: array of length max_lag+1 with acf[0] = 1.
+        """
+        x = np.asarray(x, dtype=float)
+        x = x - x.mean()
+        n = x.size
+
+        if max_lag is None or max_lag >= n:
+            max_lag = n - 1
+
+        var = np.dot(x, x) / n
+        if var == 0.0:
+            # Signal is constant; define autocorrelation as all ones
+            return np.ones(max_lag + 1)
+
+        acf = np.empty(max_lag + 1, dtype=float)
+        for lag in range(max_lag + 1):
+            # <x_t x_{t+lag}> / var
+            num = np.dot(x[:n - lag], x[lag:]) / (n - lag)
+            acf[lag] = num / var
+
+        return acf
+    #
+
+    # Integrated autocorrelation time acf[1:max_idx + 1].sum()
+    @staticmethod
+    def _integrated_autocorr_time(acf, dt=1.0, cutoff='first_nonpositive'):
+        """
+        Compute the integrated autocorrelation time from an ACF.
+        Parameters:
+            acf: 1D array, acf[0] ~ 1.
+            dt: timestep between samples (in desired time units).
+            cutoff: how far to sum the ACF. Default: sum until first nonpositive.
+        Returns:
+            tau_int: integrated autocorrelation time
+        """
+        acf = np.asarray(acf, dtype=float)
+
+        if cutoff == 'first_nonpositive':
+            # Find first lag where acf <= 0
+            pos = np.where(acf[1:] <= 0)[0]
+            if pos.size > 0:
+                max_idx = pos[0] + 1  # include up to previous positive lag
+            else:
+                max_idx = len(acf) - 1
+        else:
+            # no cutoff: use full acf
+            max_idx = len(acf) - 1
+
+        # Standard estimator: tau_int = dt * (0.5 + sum_{k>=1} C(k))
+        tau_int_frames = 0.5 + acf[1:max_idx + 1].sum()
+        return dt * tau_int_frames
+    #
+
+    def compute_end_to_end_autocorr(self, aIx1, aIx2, max_lag=None, dt=1.0,
+                                    average_over_trajs=True):
+        """
+        Compute the autocorrelation function and integrated autocorrelation time
+        for the end-to-end distance defined by atoms (aIx1, aIx2).
+        Parameters:
+            aIx1, aIx2 : int
+                Atom indices (0-based, MDTraj convention) of the two endpoints.
+            max_lag : int or None
+                Maximum lag to compute the ACF over (in frames). If None, use n_frames-1.
+            dt : float
+                Timestep between consecutive frames (in physical units, e.g. ps).
+            average_over_trajs : bool
+                If True, return ACF averaged over trajectories, and mean tau.
+                If False, return per-trajectory ACF and tau.
+        Returns:
+            If average_over_trajs:
+                acf_mean: 1D numpy array, mean autocorrelation function.
+                tau_mean: float, mean integrated autocorrelation time.
+            Else:
+                acf_list: list of 1D numpy arrays, one per trajectory.
+                tau_list: list of floats, one per trajectory.
+        """
+        if self.trajectories is None or len(self.trajectories) == 0:
+            raise ValueError("No trajectories available in self.trajectories")
+
+        acf_list = []
+        tau_list = []
+        meta_list = []
+
+        trajIx = -1
+        for traj in self.trajectories:
+            trajIx += 1
+
+            # Compute end-to-end distance time series for this trajectory
+            # shape: (n_frames, 1) -> flatten to (n_frames,)
+            distances = md.compute_distances(traj, [[aIx1, aIx2]]).ravel()
+
+            # ACF
+            acf = self._normalized_autocorrelation(distances, max_lag=max_lag)
+            acf_list.append(acf)
+
+            # Integrated autocorrelation time
+            tau_int = self._integrated_autocorr_time(acf, dt=dt)
+            tau_list.append(tau_int)
+
+            print("Appended for acf and tau for\n", self.traj_metadata_df.iloc[trajIx])
+            meta_list.append(self.traj_metadata_df.iloc[trajIx])
+
+        if average_over_trajs:
+            # Pad / truncate to same length if needed
+            min_len = min(len(a) for a in acf_list)
+            acf_stack = np.vstack([a[:min_len] for a in acf_list])
+            acf_mean = acf_stack.mean(axis=0)
+            tau_mean = float(np.mean(tau_list))
+            return acf_mean, tau_mean
+        else:
+            return acf_list, tau_list, meta_list
+    #
+
+
 
     # Basic summary statistics
     def summary_stats(self):
         ''' Return basic summary statistics of numeric columns '''
-        return self.df.describe(include='all')
+        return self.out_df.describe(include='all')
     #
 
     # Calculate exchange rates for each replica
@@ -39,7 +163,7 @@ class REXEfficiency:
                 - exchange_rate (transitions / (n_total - 1))
         '''
         results = []
-        grouped = self.df.groupby(['replicaIx', 'sim_type', 'seed'])
+        grouped = self.out_df.groupby(['replicaIx', 'sim_type', 'seed'])
 
         for (replica, sim_type, seed), group in grouped:
             thermo_series = group['thermoIx'].values
@@ -80,7 +204,7 @@ class REXEfficiency:
                 - autocorrelation
         '''
         results = []
-        grouped = self.df.groupby(['replicaIx', 'sim_type', 'seed'])
+        grouped = self.out_df.groupby(['replicaIx', 'sim_type', 'seed'])
         for (replica, sim_type, seed), group in grouped:
             M = group['thermoIx'].values
             M = M - np.mean(M)
@@ -199,7 +323,7 @@ class REXEfficiency:
         """
         results = []
 
-        grouped = self.df.groupby("seed")
+        grouped = self.out_df.groupby("seed")
         for seed, group in grouped:
             states = group["thermoIx"].values
             K = states.max() + 1  # assuming thermoIx runs from 0..K-1
@@ -254,7 +378,7 @@ class REXEfficiency:
         """
         results = []
 
-        grouped = self.df.groupby("seed")
+        grouped = self.out_df.groupby("seed")
         for seed, group in grouped:
             states = group["thermoIx"].values
             unique_states = np.unique(states)
