@@ -15,6 +15,10 @@ class REXTrajData:
         self.traj = self._load_trajectory()
 
     def _load_trajectory(self):
+        """ MDTraj load trajectory
+        Returns:
+            MDTraj object
+        """        
         try:
             traj = md.load_dcd(self.filepath, top=self.topology)
             return traj

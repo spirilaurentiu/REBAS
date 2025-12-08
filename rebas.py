@@ -65,7 +65,10 @@ class REXFNManager:
             if not match:
                 raise ValueError(f"Filename '{FN}' does not match expected format'<name_of_the_molecule>_<7-digit-seed>.repl<index>.dcd'")
 
-            seed = match.group(1)
+            print("match", match.group(1), match.group(2))
+
+            molName = match.group(1)
+            seed = match.group(2)
             sim_type = seed[2]   # third digit
 
             self.TRAJECTORY_DATA = True
@@ -78,7 +81,7 @@ class REXFNManager:
         """ Read data from file
         """
         rex = REXData(FN, self.SELECTED_COLUMNS)
-        df = rex.get_dataframe().copy()
+        df = rex.get_out_dataframe().copy()
         df['seed'] = seed
         df['sim_type'] = sim_type
 
@@ -120,6 +123,10 @@ class REXFNManager:
 
     # Get trajectory data from a single trajectory file
     def getTrajDataFromFile(self, filepath, seed, sim_type):
+        """ Load trajectory from filepath 
+        Returns:
+            MDTraj object   
+        """
         trajData = REXTrajData(filepath, topology="trpch/ligand.prmtop")
         traj = trajData.get_traj()
 
@@ -137,6 +144,8 @@ class REXFNManager:
     # Get trajectory data from all files
     def getTrajDataFromAllFiles(self, burnin=0):
         """ Grab all dcd files and read data from them
+        Returns:
+            info and MDTraj objects
         """        
         trajectories = []
         metadata_rows = []
@@ -411,7 +420,7 @@ def plot_histogram(hist_dict, title="title", xlabel="x", ylabel="Density", save_
 #endregion
 def main(args):
 
-    OUTPUT_REQUIRED, TRAJECTORY_REQUIRED = True, False # flags
+    OUTPUT_REQUIRED, TRAJECTORY_REQUIRED = False, True # flags
     FNManager = None # classes
     out_df, traj_df = None, None # pandas
 
@@ -671,59 +680,86 @@ def main(args):
 
         #region Read trajectory from all files
         FNManager = REXFNManager(args.dir, args.inFNRoots, args.cols)
-        (trajectories, metadata_df) = FNManager.getTrajDataFromAllFiles()
+        (trajectories, traj_metadata_df) = FNManager.getTrajDataFromAllFiles()
+        print(traj_metadata_df)
 
-        print(metadata_df)
+        #region Paper figures: RMSD
+        if "rmsd" in args.figures:
+            rmsd_records = []   # <-- needed
+            for i, traj in enumerate(trajectories):
+                traj_sel = traj # No atom selection by default
+                reference = traj_sel[0] # Reference = first frame
+                rmsd_values = md.rmsd(traj_sel, reference) # Compute RMSD (nm)
+                meta_row = traj_metadata_df.iloc[i].to_dict() # Store results
+                for frame_idx, value in enumerate(rmsd_values):
+                    rmsd_records.append({
+                        "traj_index": i,
+                        "frame": frame_idx,
+                        "RMSD": value,
+                        **meta_row
+                    })
 
-        rmsd_records = []   # <-- needed
+            # Convert to DataFrame
+            rmsd_df = pd.DataFrame(rmsd_records)
 
-        # ------------------------------------------------------------
-        # Compute RMSD for all trajectories
-        # ------------------------------------------------------------
-        for i, traj in enumerate(trajectories):
+            plt.figure(figsize=(10, 6))
+            plt.xlabel("Frame")
+            plt.ylabel("RMSD (nm)")
+            plt.title("RMSD Over Trajectories")
 
-            # No atom selection by default
-            traj_sel = traj
+            for traj_index, group in rmsd_df.groupby("traj_index"):
+            #for seed, group in rmsd_df.groupby("seed"):            
+                plt.plot(group["frame"], group["RMSD"], label=f"Traj {traj_index}")
 
-            # Reference = first frame
-            reference = traj_sel[0]
+            plt.legend()
+            plt.grid(True)
+            plt.tight_layout()
 
-            # Compute RMSD (nm)
-            rmsd_values = md.rmsd(traj_sel, reference)
+            #plt.show()
+            plt.savefig("rmsd_plot.png")
+            plt.close()
+        #endregion
 
-            # Store results
-            meta_row = metadata_df.iloc[i].to_dict()
+        #region Paper figures: trajectory autocorrelation
+        if "traj_eeac" in args.figures:
+            
+            rex_eff = REXEfficiency(
+                out_df=None,
+                trajectories=trajectories,
+                traj_metadata_df=traj_metadata_df
+            )
 
-            for frame_idx, value in enumerate(rmsd_values):
-                rmsd_records.append({
-                    "traj_index": i,
-                    "frame": frame_idx,
-                    "RMSD": value,
-                    **meta_row
-                })
+            # Compute per-trajectory autocorrelation functions
+            acf_list, tau_list, meta_list = rex_eff.compute_end_to_end_autocorr(
+                aIx1=8,
+                aIx2=298,
+                max_lag=3000,          # or specify an int
+                dt=1.0,                # frame time (adjust if needed)
+                average_over_trajs=False
+            )
 
-        # Convert to DataFrame
-        rmsd_df = pd.DataFrame(rmsd_records)
+            # Plot
+            plt.figure(figsize=(10, 6))
+            plt.xlabel("Lag (frames)")
+            plt.ylabel("Autocorrelation")
+            plt.title("End-to-End Distance ACF Over Trajectories")
 
-        # ------------------------------------------------------------
-        # Plot RMSD
-        # ------------------------------------------------------------
-        plt.figure(figsize=(10, 6))
-        plt.xlabel("Frame")
-        plt.ylabel("RMSD (nm)")
-        plt.title("RMSD Over Trajectories")
+            for i, acf in enumerate(acf_list):
+                seed = (meta_list[i])["seed"]
+                Color = "black"
+                if int(seed) > 3019999:
+                    Color = "red"
+                plt.plot(acf, color=Color, label=f"Traj {seed} (τ={tau_list[i]:.2f})")
 
-        for traj_index, group in rmsd_df.groupby("traj_index"):
-        #for seed, group in rmsd_df.groupby("seed"):            
-            plt.plot(group["frame"], group["RMSD"], label=f"Traj {traj_index}")
+            plt.legend()
+            plt.grid(True)
+            plt.tight_layout()
 
-        plt.legend()
-        plt.grid(True)
-        plt.tight_layout()
+            # plt.show()
+            plt.savefig("traj_acf_plot.png")
+            plt.close()            
 
-        plt.show()
-        #plt.savefig("rmsd_plot.png")
-        plt.close()
+        #endregion
 
     #region Restart: write restart files into self.dir/restDir/restDir.<seed>
     if (args.restDir):
