@@ -657,7 +657,11 @@ def main(args):
                 plt.plot(C_t, color=colors[subdfIx], label=seed)
             plt.legend()
             plt.savefig("C_t.png", dpi=300)
+            plt.show()
             plt.close()
+
+
+
 
             tau_df = rexEff.compute_autocorrelation_time(max_lag) # total autocorrelation time
             print(tau_df)
