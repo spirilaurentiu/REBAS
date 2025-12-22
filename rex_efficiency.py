@@ -81,14 +81,10 @@ class REXEfficiency:
         return dt * tau_int_frames
     #
 
-    def compute_end_to_end_autocorr(self, aIx1, aIx2, max_lag=None, dt=1.0,
-                                    average_over_trajs=True):
+    def compute_end_to_end_autocorr(self, burnin=0, max_lag=None, dt=1.0, average_over_trajs=True):
         """
         Compute the autocorrelation function and integrated autocorrelation time
-        for the end-to-end distance defined by atoms (aIx1, aIx2).
         Parameters:
-            aIx1, aIx2 : int
-                Atom indices (0-based, MDTraj convention) of the two endpoints.
             max_lag : int or None
                 Maximum lag to compute the ACF over (in frames). If None, use n_frames-1.
             dt : float
@@ -113,22 +109,23 @@ class REXEfficiency:
 
         trajIx = -1
         for traj in self.trajectories:
-            trajIx += 1
 
             # Compute end-to-end distance time series for this trajectory
             # shape: (n_frames, 1) -> flatten to (n_frames,)
-            distances = md.compute_distances(traj, [[aIx1, aIx2]]).ravel()
 
             # ACF
-            acf = self._normalized_autocorrelation(distances, max_lag=max_lag)
-            acf_list.append(acf)
+            if traj.size > burnin:
+                trajIx += 1
 
-            # Integrated autocorrelation time
-            tau_int = self._integrated_autocorr_time(acf, dt=dt)
-            tau_list.append(tau_int)
+                acf = self._normalized_autocorrelation(traj[burnin:], max_lag=max_lag)
+                acf_list.append(acf)
 
-            print("Appended for acf and tau for\n", self.traj_metadata_df.iloc[trajIx])
-            meta_list.append(self.traj_metadata_df.iloc[trajIx])
+                # Integrated autocorrelation time
+                tau_int = self._integrated_autocorr_time(acf, dt=dt)
+                tau_list.append(tau_int)
+
+                print("Appended for acf and tau for\n", self.traj_metadata_df.iloc[trajIx])
+                meta_list.append(self.traj_metadata_df.iloc[trajIx])
 
         if average_over_trajs:
             # Pad / truncate to same length if needed
@@ -140,8 +137,6 @@ class REXEfficiency:
         else:
             return acf_list, tau_list, meta_list
     #
-
-
 
     # Basic summary statistics
     def summary_stats(self):
