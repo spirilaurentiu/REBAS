@@ -8,7 +8,7 @@ import pandas as pd
 import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
-matplotlib.use('Agg')
+#matplotlib.use('Agg')
 
 from rex_data import REXData
 from rex_efficiency import RoboAnalysis, REXEfficiency
@@ -737,7 +737,7 @@ def main(args):
             acf_list, tau_list, meta_list = rex_eff.compute_end_to_end_autocorr(
                 aIx1=8,
                 aIx2=298,
-                max_lag=3000,          # or specify an int
+                max_lag=2000,          # or specify an int
                 dt=1.0,                # frame time (adjust if needed)
                 average_over_trajs=False
             )
@@ -759,7 +759,7 @@ def main(args):
             plt.grid(True)
             plt.tight_layout()
 
-            # plt.show()
+            plt.show()
             plt.savefig("traj_acf_plot.png")
             plt.close()            
 

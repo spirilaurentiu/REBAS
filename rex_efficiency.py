@@ -30,25 +30,22 @@ class REXEfficiency:
         Returns:
             acf: array of length max_lag+1 with acf[0] = 1.
         """
-        x = np.asarray(x, dtype=float)
+        x = np.asarray(x[100000:], dtype=float)
         x = x - x.mean()
         n = x.size
-
         if max_lag is None or max_lag >= n:
             max_lag = n - 1
-
         var = np.dot(x, x) / n
         if var == 0.0:
             # Signal is constant; define autocorrelation as all ones
             return np.ones(max_lag + 1)
-
         acf = np.empty(max_lag + 1, dtype=float)
         for lag in range(max_lag + 1):
             # <x_t x_{t+lag}> / var
             num = np.dot(x[:n - lag], x[lag:]) / (n - lag)
             acf[lag] = num / var
-
         return acf
+
     #
 
     # Integrated autocorrelation time acf[1:max_idx + 1].sum()
@@ -118,6 +115,7 @@ class REXEfficiency:
             # Compute end-to-end distance time series for this trajectory
             # shape: (n_frames, 1) -> flatten to (n_frames,)
             distances = md.compute_distances(traj, [[aIx1, aIx2]]).ravel()
+            distances = distances
 
             # ACF
             acf = self._normalized_autocorrelation(distances, max_lag=max_lag)
@@ -140,8 +138,6 @@ class REXEfficiency:
         else:
             return acf_list, tau_list, meta_list
     #
-
-
 
     # Basic summary statistics
     def summary_stats(self):
