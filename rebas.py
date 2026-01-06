@@ -35,13 +35,20 @@ class REXFNManager:
         FNRoots: File prefixes
         SELECTED_COLUMNS: columns selected to be read from file
     """
-    def __init__(self, dir, FNRoots, SELECTED_COLUMNS):
+    # def __init__(self, dir=None, FNRoots=None, SELECTED_COLUMNS=None):
+    #     self.dir = dir
+    #     self.FNRoots = FNRoots
+    #     self.SELECTED_COLUMNS = SELECTED_COLUMNS
+    #     self.OUTPUT_DATA = False
+    #     self.TRAJECTORY_DATA = False
+    # #
+    def __init__(self, dir=None, FNRoots=None, SELECTED_COLUMNS=None, topology="trpch/ligand.prmtop"):
         self.dir = dir
         self.FNRoots = FNRoots
         self.SELECTED_COLUMNS = SELECTED_COLUMNS
+        self.topology = topology
         self.OUTPUT_DATA = False
         self.TRAJECTORY_DATA = False
-    #
 
     # Get seed and simulation type from filename. Determine if OUT or DCD
     def getSeedAndTypeFromFN(self, FN):
@@ -121,32 +128,68 @@ class REXFNManager:
         return pd.concat(all_data, ignore_index=True) if all_data else pd.DataFrame()
     #
 
-    # Get trajectory data from a single trajectory file
-    def getTrajDataFromFile(self, filepath, seed, sim_type):
-        """ Load trajectory from filepath 
-        Returns:
-            MDTraj object   
-        """
-        trajData = REXTrajData(filepath, topology="trpch/ligand.prmtop")
-        traj = trajData.get_traj()
+    # # Get trajectory data from a single trajectory file
+    # def getTrajDataFromFile(self, FN, seed, sim_type):
+    #     """ Load trajectory from filepath 
+    #     Returns:
+    #         MDTraj object
+    #     """
+    #     trajData = REXTrajData(FN, topology="trpch/ligand.prmtop")
+    #     traj, meta = trajData.get_traj_observable()
+    #     trajData.clear()
+    #     return (traj, meta)
+    # #
+    # # Get trajectory data from all files
+    # def getTrajDataFromAllFiles(self):
+    #     """ Grab all dcd files and read data from them
+    #     Returns:
+    #         info and MDTraj objects
+    #     """        
+    #     trajectories = []
+    #     metadata_rows = []
+    #     for FNRoot in self.FNRoots:
+    #         pattern = os.path.join(self.dir, FNRoot + "*")
+    #         matches = glob.glob(pattern)
+    #         if not matches:
+    #             print(f"Warning: No files found matching {FNRoot}*", file=sys.stderr)
+    #             continue
+    #         for filepath in matches:
+    #             print(f"Reading {filepath} ...", end=" ", flush=True)
+    #             try:
+    #                 seed, sim_type = self.getSeedAndTypeFromFN(os.path.basename(filepath))
+    #             except ValueError as e:
+    #                 print(f"[SKIP] Bad filename: {filepath} -> {e}", file=sys.stderr)
+    #                 continue
+    #             try:
+    #                 traj, meta = self.getTrajDataFromFile(filepath, seed, sim_type)
+    #             except Exception as e:
+    #                 print(f"[FAIL] Error reading {filepath}: {e}", file=sys.stderr)
+    #                 continue
+    #             trajectories.append(traj)
+    #             metadata_rows.append(meta)
+    #             print("done.")
+    #     metadata_df = pd.DataFrame(metadata_rows)
+    #     return trajectories, metadata_df
+    # #
 
-        meta = {
-            "filepath": filepath,
-            "n_frames": traj.n_frames,
-            "n_atoms": traj.n_atoms,
-            "seed": seed,
-            "sim_type": sim_type
-        }
+    def getTrajDataFromFile(self, FN, seed, sim_type, observable_fn, *, frames=None, **obs_kwargs):
+        trajData = REXTrajData(FN, topology=self.topology)
 
-        return traj, meta
-    #
+        obs, meta = trajData.get_traj_observable(
+            observable_fn,
+            frames=frames,
+            **obs_kwargs
+        )
 
-    # Get trajectory data from all files
-    def getTrajDataFromAllFiles(self, burnin=0):
-        """ Grab all dcd files and read data from them
-        Returns:
-            info and MDTraj objects
-        """        
+        trajData.clear()
+
+        # enrich meta with filename-derived info
+        meta["seed"] = seed
+        meta["sim_type"] = sim_type
+
+        return obs, meta
+
+    def getTrajDataFromAllFiles(self, observable_fn, *, frames=None, **obs_kwargs):
         trajectories = []
         metadata_rows = []
 
@@ -168,20 +211,23 @@ class REXFNManager:
                     continue
 
                 try:
-                    traj, meta = self.getTrajDataFromFile(filepath, seed, sim_type)
+                    obs, meta = self.getTrajDataFromFile(
+                        filepath, seed, sim_type,
+                        observable_fn,
+                        frames=frames,
+                        **obs_kwargs
+                    )
                 except Exception as e:
                     print(f"[FAIL] Error reading {filepath}: {e}", file=sys.stderr)
                     continue
 
-                trajectories.append(traj)
+                trajectories.append(obs)
                 metadata_rows.append(meta)
-
                 print("done.")
 
         metadata_df = pd.DataFrame(metadata_rows)
         return trajectories, metadata_df
-    #
-
+    
     # Write restart files into self.dir/restDir/restDir.<seed>
     def write_restarts_from_trajectories(self, restDir, topology, out_ext='rst7', dry=False):
         """ Read trajectory files of the form <mol>_<seed>.<replica>.dcd from self.dir,
@@ -396,6 +442,44 @@ def plot_histogram(hist_dict, title="title", xlabel="x", ylabel="Density", save_
         plt.show()
     plt.close()
 #
+
+
+
+def stack_pad_nan(traj_list):
+    max_len = max(len(x) for x in traj_list)
+    arr = np.full((len(traj_list), max_len), np.nan, dtype=float)
+    for i, x in enumerate(traj_list):
+        x = np.asarray(x, dtype=float)
+        arr[i, :len(x)] = x
+    return arr, max_len
+
+def running_mean_and_som(x):
+    """
+    Running mean and standard deviation of the mean (SOM).
+
+    Parameters
+    ----------
+    x : 1D np.ndarray
+
+    Returns
+    -------
+    mean : np.ndarray
+        Running mean
+    som : np.ndarray
+        Running standard deviation of the mean
+    """
+    x = np.asarray(x, dtype=float)
+    n = np.arange(1, len(x) + 1)
+
+    mean = np.cumsum(x) / n
+
+    # Running variance of the mean
+    var = np.zeros_like(mean)
+    for i in range(1, len(x)):
+        var[i] = np.sum((x[:i+1] - mean[i])**2) / i
+
+    som = np.sqrt(var)
+    return mean, som
 
 
 # ============ PANDAS DOCUMENTATION ============
@@ -678,66 +762,198 @@ def main(args):
 
 
 
+
+
+
     if TRAJECTORY_REQUIRED:
 
-        GLOBAL_BURNIN = 0
-
-        #region Read trajectory from all files
-        FNManager = REXFNManager(args.dir, args.inFNRoots, args.cols)
-        (trajectories, traj_metadata_df) = FNManager.getTrajDataFromAllFiles()
-        print(traj_metadata_df)
-
         #region Paper figures: RMSD
-        if "rmsd" in args.figures:
-            rmsd_records = []   # <-- needed
-            for i, traj in enumerate(trajectories):
-                traj_sel = traj # No atom selection by default
-                reference = traj_sel[0] # Reference = first frame
-                rmsd_values = md.rmsd(traj_sel, reference) # Compute RMSD (nm)
-                meta_row = traj_metadata_df.iloc[i].to_dict() # Store results
-                for frame_idx, value in enumerate(rmsd_values):
-                    rmsd_records.append({
-                        "traj_index": i,
-                        "frame": frame_idx,
-                        "RMSD": value,
-                        **meta_row
-                    })
+        # if "rmsd" in args.figures:
+        #     rmsd_records = []   # <-- needed
+        #     for i, traj in enumerate(traj_observables):
+        #         traj_sel = traj # No atom selection by default
+        #         reference = traj_sel[0] # Reference = first frame
+        #         rmsd_values = md.rmsd(traj_sel, reference) # Compute RMSD (nm)
+        #         meta_row = traj_metadata_df.iloc[i].to_dict() # Store results
+        #         for frame_idx, value in enumerate(rmsd_values):
+        #             rmsd_records.append({
+        #                 "traj_index": i,
+        #                 "frame": frame_idx,
+        #                 "RMSD": value,
+        #                 **meta_row
+        #             })
+        #     # Convert to DataFrame
+        #     rmsd_df = pd.DataFrame(rmsd_records)
+        #     plt.figure(figsize=(10, 6))
+        #     plt.xlabel("Frame")
+        #     plt.ylabel("RMSD (nm)")
+        #     plt.title("RMSD Over Trajectories")            
+        #     for traj_index, group in rmsd_df.groupby("traj_index"):
+        #     #for seed, group in rmsd_df.groupby("seed"):            
+        #         plt.plot(group["frame"], group["RMSD"], label=f"Traj {traj_index}")
+        #     plt.legend()
+        #     plt.grid(True)
+        #     plt.tight_layout()
+        #     #plt.show()
+        #     plt.savefig("rmsd_plot.png")
+        #     plt.close()
+        #  if "obs" in args.figures:
+        #     print("traj_observables")
+        #     print(traj_observables)
+        #     print("traj_metadata_df")            
+        #     print(traj_metadata_df)
+        #     # Plot
+        #     plt.figure(figsize=(10, 6))
+        #     plt.xlabel("(frames)")
+        #     plt.ylabel("Observable")
+        #     plt.title("Observable")
+        #     utilObj = REXFNManager()
+        #     for i, traj in enumerate(traj_observables):
+        #         FN = (traj_metadata_df.iloc[i])["filepath"]
+        #         seed, sim_type = utilObj.getSeedAndTypeFromFN(os.path.basename(FN))
+        #         Color = "black"
+        #         if int(seed) > 3019999:
+        #             Color = "red"
+        #         plt.plot(traj, color=Color, label=f"Traj {FN}")
+        #     plt.legend()
+        #     plt.grid(True)
+        #     plt.tight_layout()
+        #     # plt.show()
+        #     plt.savefig("traj_obs.png")
+        #     plt.close() 
+        # #endregion
 
-            # Convert to DataFrame
-            rmsd_df = pd.DataFrame(rmsd_records)
+        if "obs_mom" in args.figures:
+        
+            GLOBAL_BURNIN = 0
 
+            # pick your frame slice once:
+            frames = slice(GLOBAL_BURNIN, 80000)   # or slice(GLOBAL_BURNIN, None)
+
+            # define any observable you want:
+            def dist_8_298(traj, a1=8, a2=298):
+                return md.compute_distances(traj, [[a1, a2]]).ravel()
+
+            FNManager = REXFNManager(args.dir, args.inFNRoots, args.cols)
+
+            (traj_observables, traj_metadata_df) = FNManager.getTrajDataFromAllFiles(
+                dist_8_298,
+                frames=frames,
+                a1=8, a2=298,   # optional; overrides defaults
+            )
+
+            print(traj_metadata_df)
+
+            print("traj_observables")
+            print(traj_observables)
+            print("traj_metadata_df")            
+            print(traj_metadata_df)
+
+            # Plot
             plt.figure(figsize=(10, 6))
-            plt.xlabel("Frame")
-            plt.ylabel("RMSD (nm)")
-            plt.title("RMSD Over Trajectories")
+            plt.xlabel("(frames)")
+            plt.ylabel("Observable")
+            plt.title("Observable")
 
-            for traj_index, group in rmsd_df.groupby("traj_index"):
-            #for seed, group in rmsd_df.groupby("seed"):            
-                plt.plot(group["frame"], group["RMSD"], label=f"Traj {traj_index}")
+            utilObj = REXFNManager()
+
+            listOfType1Sims = []
+            listOfType2Sims = []
+
+            utilObj = REXFNManager()
+
+            for i, traj in enumerate(traj_observables):
+                FN = traj_metadata_df.iloc[i]["filepath"]
+                seed, sim_type = utilObj.getSeedAndTypeFromFN(os.path.basename(FN))
+
+                if int(sim_type) == 1:
+                    listOfType1Sims.append(traj)
+                else:
+                    listOfType2Sims.append(traj)
+
+            type1_arr, L1 = stack_pad_nan(listOfType1Sims)
+            type2_arr, L2 = stack_pad_nan(listOfType2Sims)
+
+            print("type1_arr, L1", type1_arr, L1)
+            print("type2_arr, L2", type2_arr, L2)
+
+            type1_mean = np.nanmean(type1_arr, axis=0)
+            type2_mean = np.nanmean(type2_arr, axis=0)
+
+            # type1_mom = np.cumsum(type1_mean) / np.arange(1, len(type1_mean) + 1)
+            # type2_mom = np.cumsum(type2_mean) / np.arange(1, len(type2_mean) + 1)
+
+            type1_mom, type1_som = running_mean_and_som(type1_mean)
+            type2_mom, type2_som = running_mean_and_som(type2_mean)
+
+            print("type1_mean", type1_mean)
+            print("type2_mean", type2_mean)
+
+
+
+            x = np.arange(len(type1_mom))
+            somStride = 1000
+
+            # plt.plot(type1_mom, label="Type 1 mean", color="black")
+            # plt.plot(type2_mom, label="Type 2 mean", color="red")
+            # plt.errorbar(
+            #     x[::somStride],
+            #     type1_mom[::somStride],
+            #     yerr=type1_som[::somStride],
+            #     fmt='-',
+            #     color='black',
+            #     label='Type 1 MOM'
+            # )
+            # plt.errorbar(
+            #     x[::somStride] + (somStride/8),
+            #     type2_mom[::somStride],
+            #     yerr=type2_som[::somStride],
+            #     fmt='-',
+            #     color='red',
+            #     label='Type 2 MOM'
+            # )
+
+            plt.plot(type1_mom, label="Type 1 MOM", color="black")
+            plt.fill_between(
+                x,
+                (type1_mom - (type1_som/2)),
+                (type1_mom + (type1_som/2)),
+                color="black",
+                alpha=0.3
+            )
+            plt.plot(type2_mom, label="Type 2 MOM", color="red")
+            plt.fill_between(
+                x,
+                (type2_mom - (type2_som/2)),
+                (type2_mom + (type2_som/2)),
+                color="red",
+                alpha=0.3
+            )
 
             plt.legend()
             plt.grid(True)
             plt.tight_layout()
 
-            #plt.show()
-            plt.savefig("rmsd_plot.png")
-            plt.close()
-        #endregion
+            plt.show()
+            plt.savefig("traj_obs.png")
+            plt.close() 
 
         #region Paper figures: trajectory autocorrelation
         if "traj_eeac" in args.figures:
             
             rex_eff = REXEfficiency(
                 out_df=None,
-                trajectories=trajectories,
+                trajectories=traj_observables,
                 traj_metadata_df=traj_metadata_df
             )
 
+            print(rex_eff.trajectories)
+            print(rex_eff.traj_metadata_df)
+
             # Compute per-trajectory autocorrelation functions
             acf_list, tau_list, meta_list = rex_eff.compute_end_to_end_autocorr(
-                aIx1=8,
-                aIx2=298,
-                max_lag=2000,          # or specify an int
+                burnin=GLOBAL_BURNIN,
+                max_lag=3000,          # or specify an int
                 dt=1.0,                # frame time (adjust if needed)
                 average_over_trajs=False
             )
@@ -748,12 +964,16 @@ def main(args):
             plt.ylabel("Autocorrelation")
             plt.title("End-to-End Distance ACF Over Trajectories")
 
+            utilObj = REXFNManager()
+
             for i, acf in enumerate(acf_list):
-                seed = (meta_list[i])["seed"]
+                FN = (meta_list[i])["filepath"]
+                seed, sim_type = utilObj.getSeedAndTypeFromFN(os.path.basename(FN))
                 Color = "black"
                 if int(seed) > 3019999:
+                #if False:
                     Color = "red"
-                plt.plot(acf, color=Color, label=f"Traj {seed} (τ={tau_list[i]:.2f})")
+                plt.plot(acf, color=Color, label=f"Traj {FN} (τ={tau_list[i]:.2f})")
 
             plt.legend()
             plt.grid(True)
