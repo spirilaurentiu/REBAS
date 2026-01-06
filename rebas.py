@@ -128,6 +128,7 @@ class REXFNManager:
         return pd.concat(all_data, ignore_index=True) if all_data else pd.DataFrame()
     #
 
+    #
     # # Get trajectory data from a single trajectory file
     # def getTrajDataFromFile(self, FN, seed, sim_type):
     #     """ Load trajectory from filepath 

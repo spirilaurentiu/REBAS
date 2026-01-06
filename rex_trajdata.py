@@ -1,4 +1,6 @@
 # rex_trajdata.py
+from typing import Callable, Any, Dict, Tuple, Optional
+
 import pandas as pd
 import sys
 import mdtraj as md
@@ -14,6 +16,11 @@ class REXTrajData:
         self.filepath = filepath
         self.topology = topology
         self.traj = self._load_trajectory()
+        
+        self._observables = {
+            "distance": lambda t, pair: md.compute_distances(t, [pair]).ravel(),
+            "rg": lambda t: md.compute_rg(t),
+        }        
 
     def _load_trajectory(self):
         """ MDTraj load trajectory
@@ -31,44 +38,40 @@ class REXTrajData:
     def get_traj(self):
         return self.traj
     #
-    
-    def get_traj_observable(self):
-        """
-        Get observable from trajectory
-        """
+
+    def get_traj_observable(self, observable="rg", *, frames=None, **kwargs):
+        """ Get observable from trajectory """
+        
+        traj = self.traj[frames] if frames is not None else self.traj
 
         meta = {
             "filepath": self.filepath,
-            "n_frames": self.traj.n_frames,
-            "n_atoms": self.traj.n_atoms,
+            "n_frames": traj.n_frames,
+            "n_atoms": traj.n_atoms,
+            "frames": frames,
         }
 
-        #    "seed": self.seed,
-        #    "sim_type": sim_type
+        if isinstance(observable, str):
+            if observable not in self._observables:
+                raise ValueError(f"Unknown observable '{observable}'. Options: {list(self._observables)}")
+            fn = self._observables[observable]
+            meta["observable"] = observable
 
-        aIx1 = 8
-        aIx2 = 298
-        observable = md.compute_distances(self.traj[:80000], [[aIx1, aIx2]]).ravel()
-        #observable = md.compute_inertia_tensor(traj[::10])
-        #observable = md.compute_rg(self.traj, masses=None)
-        #print(observable)
+        elif callable(observable):
+            fn = observable
+            meta["observable"] = getattr(fn, "__name__", str(fn))
+        
+        else:
+            raise TypeError("observable must be a string key or a callable")
 
-        # ca_ix = self.traj.topology.select("name CA")     # indices of Cα atoms
-        # traj_ca = self.traj.atom_slice(ca_ix)            # new traj with only Cα
-        # I = md.compute_inertia_tensor(traj_ca)      # (n_frames, 3, 3)
-        # evals, _ = np.linalg.eigh(I)                # (n_frames, 3), sorted ascending
-        # I1, I2, I3 = evals.T
-        # kappa2 = ((I1 - I2)**2 + (I2 - I3)**2 + (I3 - I1)**2) / (2.0 * (I1 + I2 + I3)**2)
-        # asphericity = I3 - 0.5*(I1 + I2)
-        # observable = kappa2
-
-        return (observable, meta)
+        obs = np.asarray(fn(traj, **kwargs))
+        return (obs, meta)
     #
 
     def clear(self):
         """ For memory """
         del self.traj
         self.traj = None
-        #
+        ##
 
 #endregion --------------------------------------------------------------------
