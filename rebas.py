@@ -88,7 +88,7 @@ class REXFNManager:
         """ Read data from file
         """
         rex = REXData(FN, self.SELECTED_COLUMNS)
-        df = rex.get_out_dataframe().copy()
+        df = rex.get_dataframe().copy()
         df['seed'] = seed
         df['sim_type'] = sim_type
 
@@ -127,51 +127,6 @@ class REXFNManager:
 
         return pd.concat(all_data, ignore_index=True) if all_data else pd.DataFrame()
     #
-
-    #
-    # # Get trajectory data from a single trajectory file
-    # def getTrajDataFromFile(self, FN, seed, sim_type):
-    #     """ Load trajectory from filepath 
-    #     Returns:
-    #         MDTraj object
-    #     """
-    #     trajData = REXTrajData(FN, topology="trpch/ligand.prmtop")
-    #     traj, meta = trajData.get_traj_observable()
-    #     trajData.clear()
-    #     return (traj, meta)
-    # #
-    # # Get trajectory data from all files
-    # def getTrajDataFromAllFiles(self):
-    #     """ Grab all dcd files and read data from them
-    #     Returns:
-    #         info and MDTraj objects
-    #     """        
-    #     trajectories = []
-    #     metadata_rows = []
-    #     for FNRoot in self.FNRoots:
-    #         pattern = os.path.join(self.dir, FNRoot + "*")
-    #         matches = glob.glob(pattern)
-    #         if not matches:
-    #             print(f"Warning: No files found matching {FNRoot}*", file=sys.stderr)
-    #             continue
-    #         for filepath in matches:
-    #             print(f"Reading {filepath} ...", end=" ", flush=True)
-    #             try:
-    #                 seed, sim_type = self.getSeedAndTypeFromFN(os.path.basename(filepath))
-    #             except ValueError as e:
-    #                 print(f"[SKIP] Bad filename: {filepath} -> {e}", file=sys.stderr)
-    #                 continue
-    #             try:
-    #                 traj, meta = self.getTrajDataFromFile(filepath, seed, sim_type)
-    #             except Exception as e:
-    #                 print(f"[FAIL] Error reading {filepath}: {e}", file=sys.stderr)
-    #                 continue
-    #             trajectories.append(traj)
-    #             metadata_rows.append(meta)
-    #             print("done.")
-    #     metadata_df = pd.DataFrame(metadata_rows)
-    #     return trajectories, metadata_df
-    # #
 
     def getTrajDataFromFile(self, FN, seed, sim_type, observable_fn, *, frames=None, **obs_kwargs):
         trajData = REXTrajData(FN, topology=self.topology)
@@ -444,8 +399,6 @@ def plot_histogram(hist_dict, title="title", xlabel="x", ylabel="Density", save_
     plt.close()
 #
 
-
-
 def stack_pad_nan(traj_list):
     max_len = max(len(x) for x in traj_list)
     arr = np.full((len(traj_list), max_len), np.nan, dtype=float)
@@ -537,6 +490,7 @@ def main(args):
                     out_df = out_df[out_df[col].isin(val)]
                 else:  # single value
                     out_df = out_df[out_df[col] == val]
+        #endregion
 
         #region Panda_Study
         # print("out_df:\n", out_df)
@@ -554,8 +508,6 @@ def main(args):
         # print('\n\nout_df.get("pe_o"):\n', out_df.get("pe_o"))
         # print('\n\nout_df.get("pe_o").to_numpy():\n', out_df.get("pe_o").to_numpy())
         #endregion Panda_Study
-
-        #endregion
 
         #region In-house basic checks
         # Column histograms checks
@@ -762,10 +714,6 @@ def main(args):
         #endregion
 
 
-
-
-
-
     if TRAJECTORY_REQUIRED:
 
         #region Paper figures: RMSD
@@ -798,6 +746,9 @@ def main(args):
         #     #plt.show()
         #     plt.savefig("rmsd_plot.png")
         #     plt.close()
+        #endregion
+
+        #region Paper figures: Observables
         #  if "obs" in args.figures:
         #     print("traj_observables")
         #     print(traj_observables)
@@ -822,14 +773,14 @@ def main(args):
         #     # plt.show()
         #     plt.savefig("traj_obs.png")
         #     plt.close() 
-        # #endregion
+        #endregion
 
         if "obs_mom" in args.figures:
         
             GLOBAL_BURNIN = 0
 
             # pick your frame slice once:
-            frames = slice(GLOBAL_BURNIN, 80000)   # or slice(GLOBAL_BURNIN, None)
+            frames = slice(GLOBAL_BURNIN, 150)   # or slice(GLOBAL_BURNIN, None)
 
             # define any observable you want:
             def dist_8_298(traj, a1=8, a2=298):
@@ -881,16 +832,11 @@ def main(args):
             type1_mean = np.nanmean(type1_arr, axis=0)
             type2_mean = np.nanmean(type2_arr, axis=0)
 
-            # type1_mom = np.cumsum(type1_mean) / np.arange(1, len(type1_mean) + 1)
-            # type2_mom = np.cumsum(type2_mean) / np.arange(1, len(type2_mean) + 1)
-
             type1_mom, type1_som = running_mean_and_som(type1_mean)
             type2_mom, type2_som = running_mean_and_som(type2_mean)
 
             print("type1_mean", type1_mean)
             print("type2_mean", type2_mean)
-
-
 
             x = np.arange(len(type1_mom))
             somStride = 1000
