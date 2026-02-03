@@ -4,11 +4,14 @@ import os
 import re
 import sys
 import glob
+from turtle import title
 import pandas as pd
 import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
 #matplotlib.use('Agg')
+
+from mystats import *
 
 from rex_data import REXData
 from rex_efficiency import RoboAnalysis, REXEfficiency
@@ -128,7 +131,24 @@ class REXFNManager:
         return pd.concat(all_data, ignore_index=True) if all_data else pd.DataFrame()
     #
 
+    # Get trajectory data from a single file
     def getTrajDataFromFile(self, FN, seed, sim_type, observable_fn, *, frames=None, **obs_kwargs):
+        """
+        Get trajectory data from a single file
+        :param FN: Filename
+        :param seed: seed
+        :param sim_type: simulation type
+        :param observable_fn: Observable function or key
+        :param frames: Frames to include
+        :param obs_kwargs: Additional arguments for observable function
+        :return: tuple of (obs, meta) where meta is a dict with keys:
+            - filepath
+            - n_frames
+            - n_atoms
+            - frames
+            - seed
+            - sim_type
+        """
         trajData = REXTrajData(FN, topology=self.topology)
 
         obs, meta = trajData.get_traj_observable(
@@ -144,9 +164,25 @@ class REXFNManager:
         meta["sim_type"] = sim_type
 
         return obs, meta
+    #
 
+    # Get trajectory data from all files. Deals with file globbing.
     def getTrajDataFromAllFiles(self, observable_fn, *, frames=None, **obs_kwargs):
-        trajectories = []
+        """
+        Get trajectory data from all files
+        
+        :param observable_fn: Observable function or key
+        :param frames: Frames to include
+        :param obs_kwargs: Additional arguments for observable function
+        :return: list of observable arrays and metadata containing:
+            - filepath
+            - n_frames
+            - n_atoms
+            - frames
+            - seed
+            - sim_type
+        """
+        obsList = []
         metadata_rows = []
 
         for FNRoot in self.FNRoots:
@@ -177,12 +213,13 @@ class REXFNManager:
                     print(f"[FAIL] Error reading {filepath}: {e}", file=sys.stderr)
                     continue
 
-                trajectories.append(obs)
+                obsList.append(obs)
                 metadata_rows.append(meta)
                 print("done.")
 
         metadata_df = pd.DataFrame(metadata_rows)
-        return trajectories, metadata_df
+        return obsList, metadata_df
+    #
     
     # Write restart files into self.dir/restDir/restDir.<seed>
     def write_restarts_from_trajectories(self, restDir, topology, out_ext='rst7', dry=False):
@@ -283,16 +320,16 @@ def parse_filters(filters):
         vals = val_str.split(',')
 
         parsed_vals = []
-        for v in vals:
-            v = v.strip()
+        for value in vals:
+            value = value.strip()
             try:
-                v = int(v)
+                value = int(value)
             except ValueError:
                 try:
-                    v = float(v)
+                    value = float(value)
                 except ValueError:
                     pass  # leave as string
-            parsed_vals.append(v)
+            parsed_vals.append(value)
 
         # Store single values as scalar, multi as list
         filter_dict[key] = parsed_vals if len(parsed_vals) > 1 else parsed_vals[0]
@@ -301,7 +338,7 @@ def parse_filters(filters):
 #
 
 # Generic plotting function for timelines
-def plot1D(df, col, save_path=None):
+def plotChecks1D(df, col, save_path=None):
     """ Plot values of a single column in the order they appear in the DataFrame.
     Arguments:
         df : DataFrame
@@ -332,8 +369,75 @@ def plot1D(df, col, save_path=None):
         plt.show()
 #
 
+# Generic plotting function for 1D line plots
+def plot1D(Y,
+           X=None,
+           Yerr=None,
+           title="title",
+           xlabel="x",
+           ylabel="y",
+           labels=None,
+           colors=None,
+           save_path=None):
+    """ Plot values of two columns against each other in a line plot.
+    Arguments:
+        X : array-like for x-axis
+        Y : array-like for y-axis
+    """
+
+    # Y should be a list of arrays
+    if not isinstance(Y, list):
+        Y = list(Y)
+    for ix, Y_series in enumerate(Y):
+        Y[ix] = np.asarray(Y_series, dtype=float)
+
+    # Yerr should be a list of arrays
+    if Yerr is not None:
+        if not isinstance(Yerr, list):
+            Yerr = list(Yerr)
+        for ix, Yerr_series in enumerate(Yerr):
+            Yerr[ix] = np.asarray(Yerr_series, dtype=float)
+
+    # If X is None, create default X as range for each Y series
+    if X is None:
+        X = []
+        for ix, Y_series in enumerate(Y):
+            X.append(np.arange(len(Y_series)))
+
+    # Labels should be a list of strings
+    if not isinstance(labels, list):
+        labels = [None] * len(Y)
+    
+    # Plot generics
+    plt.figure()
+    plt.title(title)
+    plt.xlabel(xlabel)
+    plt.ylabel(ylabel)
+
+    # Plt plot or errorbar
+    for ix, Y_series in enumerate(Y):
+        if Yerr is None:
+            plt.plot(X[ix], Y_series, label=labels[ix],
+                    color=colors[ix] if colors else None)
+        else:
+            plt.errorbar(X[ix], Y_series, yerr=Yerr[ix], label=labels[ix],
+                    color=colors[ix] if colors else None)
+    
+    # Plot finishing touches
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+
+    # Save or show
+    if save_path:
+        plt.savefig(save_path)
+    else:
+        pass
+        #plt.show()
+#
+
 # Generic plotting function for 2D scatters
-def plot2D(df, xcol, ycol, save_path=None):
+def plot2DWithErr(df, xcol, ycol, save_path=None):
     """ Plot values of two columns against each other in a scatter plot.
     Arguments:
         df : DataFrame
@@ -399,43 +503,25 @@ def plot_histogram(hist_dict, title="title", xlabel="x", ylabel="Density", save_
     plt.close()
 #
 
-def stack_pad_nan(traj_list):
-    max_len = max(len(x) for x in traj_list)
-    arr = np.full((len(traj_list), max_len), np.nan, dtype=float)
-    for i, x in enumerate(traj_list):
+from scipy.signal import find_peaks
+
+
+def stack_pad_nan(traj_obs_list):
+    max_len = max(len(x) for x in traj_obs_list)
+    arr = np.full((len(traj_obs_list), max_len), np.nan, dtype=float)
+    for i, x in enumerate(traj_obs_list):
         x = np.asarray(x, dtype=float)
         arr[i, :len(x)] = x
     return arr, max_len
 
-def running_mean_and_som(x):
-    """
-    Running mean and standard deviation of the mean (SOM).
-
-    Parameters
-    ----------
-    x : 1D np.ndarray
-
-    Returns
-    -------
-    mean : np.ndarray
-        Running mean
-    som : np.ndarray
-        Running standard deviation of the mean
-    """
-    x = np.asarray(x, dtype=float)
-    n = np.arange(1, len(x) + 1)
-
-    mean = np.cumsum(x) / n
-
-    # Running variance of the mean
-    var = np.zeros_like(mean)
-    for i in range(1, len(x)):
-        var[i] = np.sum((x[:i+1] - mean[i])**2) / i
-
-    som = np.sqrt(var)
-    return mean, som
-
-
+def colorByType(sim_type):
+    if int(sim_type) == 1:
+        return "black"
+    elif int(sim_type) == 3:
+        return "red"
+    else:
+        return "grey"
+    
 # ============ PANDAS DOCUMENTATION ============
 # dataframe: two-dimensional, size-mutable, potentially heterogeneous tabular data
 # grouped: pandas.core.groupby.DataFrameGroupBy object = lazy grouping object - essentially a recipe for how the DataFrame should be grouped
@@ -458,13 +544,19 @@ def running_mean_and_som(x):
 #endregion
 def main(args):
 
-    OUTPUT_REQUIRED, TRAJECTORY_REQUIRED = False, True # flags
+    OUTPUT_REQUIRED, TRAJECTORY_REQUIRED = False, False # default flags
+    
+    if args.inFNRoots[0][0:3] == 'out':
+        OUTPUT_REQUIRED = True
+    else:
+        TRAJECTORY_REQUIRED = True
+    
     FNManager = None # classes
     out_df, traj_df = None, None # pandas
 
     if OUTPUT_REQUIRED:
 
-        GLOBAL_BURNIN = 1000
+        GLOBAL_BURNIN = 0
 
         #region Read output from all files
         if args.useCache and os.path.exists(args.outCacheFile):
@@ -491,6 +583,16 @@ def main(args):
                 else:  # single value
                     out_df = out_df[out_df[col] == val]
         #endregion
+
+        out_df.info()
+        # #print("outf_df info:\n", out_df.info())
+
+        efficiencyMetrics = calculate_pt_diagnostics(out_df)
+        print("Efficiency metrics mixing matrix:")
+        print(efficiencyMetrics['mixing_matrix'])
+        print("Replica exchange rates:")
+        print(efficiencyMetrics['replica_exchange_rate'])
+        exit()
 
         #region Panda_Study
         # print("out_df:\n", out_df)
@@ -526,7 +628,7 @@ def main(args):
                     plot_histogram(hist_df, save_path=save_path)
                 else:
                     save_path = f"check_{column}.png"
-                    plot1D(out_df, column, save_path=save_path)
+                    plotChecks1D(out_df, column, save_path=save_path)
         #endregion
 
         #region In-house other checks
@@ -566,88 +668,183 @@ def main(args):
             #plot_histogram(dpeHist_df)
         #endregion
 
-        #region Paper figures: Validation
-        if "pe_o" in args.figures:
+        #region Paper figures: pe_o
+        argPEstr = "pe_o"
+        PEstr = "PE"
+        if argPEstr in args.figures:
 
-            # roboAna = RoboAnalysis(out_df)
-            # hist_df = roboAna.column_histograms('pe_o', bins=5)
-            # print("hist_df pandas", pd.DataFrame(hist_df))
-            # print("hist_df.values", hist_df.values())
-            # plot_histogram(hist_df, save_path="x.png")
-            # plot_histogram(hist_df)
+            observables = []
+            observables_meta = []
+            ix = -1
+            for (sim_type, seed), subdf_group in out_df.groupby(["sim_type", "seed"]):
+                ix += 1
+                print(f"Processing sim_type={sim_type}, seed={seed} (group {ix})")
+                #print(subdf_group)
+                observables.append(subdf_group[argPEstr].to_numpy())
+                observables_meta.append({
+                    "sim_type": sim_type,
+                    "seed": seed,})
 
-            # consistent bins across all groups
-            col_clean = out_df['pe_o'].dropna()
-            lower_percentile = 0.2 #0.005
-            upper_percentile = 98.0 #99.995
-            nbins = 300
+            # Get cumulative mean and som for each trajectory
+            min_len = min(len(Y) for Y in observables)
+            max_len = max(len(Y) for Y in observables)
+            min_glob = min(Y.min() for Y in observables)
+            max_glob = max(Y.max() for Y in observables)
+            obs_list_trimmed = np.array([Y[:min_len] for Y in observables])
 
-            vmin = np.percentile(col_clean, lower_percentile)
-            vmax = np.percentile(col_clean, upper_percentile)
-            bin_edges = np.linspace(vmin, vmax, nbins + 1)
-            bin_centers = 0.5 * (bin_edges[:-1] + bin_edges[1:])
+            cumMean_list = []
+            cumSom_list = []
+            for ix, obs in enumerate(obs_list_trimmed):
+                cumMean, cumSom = cum_scum(obs)
+                cumMean_list.append(cumMean)
+                cumSom_list.append(cumSom)
 
-            # dictionary to hold histograms per (sim_type, thermoIx)
-            histograms_by_type_thermo = {}
+            # Get ensemble means and stds across trajectories
+            type1_obs = []
+            type3_obs = []
+            for ix, obs in enumerate(obs_list_trimmed):
+                sim_type = observables_meta[ix]["sim_type"]
+                if int(sim_type) == 1:
+                    type1_obs.append(obs)
+                elif int(sim_type) == 3:
+                    type3_obs.append(obs)
+                else:
+                    sys.exit(f"Unknown sim_type {sim_type} encountered.")
 
-            # loop over sim_type and thermoIx
-            for (sim_type, thermoIx), subdf_group in out_df.groupby(["sim_type", "thermoIx"]):
-                # list to store densities across seeds
-                seed_densities = []
-                
-                # loop over seeds for this sim_type and thermoIx
-                for seed, subdf in subdf_group.groupby("seed"):
-                    counts, _ = np.histogram(subdf["pe_o"], bins=bin_edges)
-                    densities = counts / counts.sum() if counts.sum() > 0 else counts
-                    seed_densities.append(densities)
-                
-                density_array = np.array(seed_densities)
-                avg_density = np.mean(density_array, axis=0)
-                std_density = np.std(density_array, axis=0)
-                
-                histograms_by_type_thermo[(sim_type, thermoIx)] = {
-                    "avg_density": avg_density,
-                    "std_density": std_density,
-                    "bin_edges": bin_edges
-                }
-                    
+            type1_ens_results = ensemble_histogram_plus(
+                type1_obs,
+                density=True,
+                bins=50,
+                obs_range=(min_glob, max_glob)
+            )
+            
+            type3_ens_results = ensemble_histogram_plus(
+                type3_obs,
+                density=True,
+                bins=50,
+                obs_range=(min_glob, max_glob)
+            )
+            #print("type1_bin_centers", type1_ens_results["bin_centers"])
+            #print("type3_bin_centers", type3_ens_results["bin_centers"])
+            assert np.allclose(type1_ens_results["bin_centers"], type3_ens_results["bin_centers"]), "Bin centers do not match between types."
 
-            # ---- Plot ----
-            plt.figure(figsize=(10, 6))
-            colors = [
-                "black", "maroon", "red", "orange", "yellow", "green", "cyan", "blue", "violet", "pink",
-            ]
+            # Get autocorrelation functions
+            acf_list = []
+            for ix, obs in enumerate(obs_list_trimmed):
+                acf = normalized_autocorrelation(obs, max_lag=min_len - 1)
+                acf_list.append(acf)
 
-            for (sim_type, thermoIx), data in histograms_by_type_thermo.items():
-                plt.errorbar(
-                    bin_centers, 
-                    data["avg_density"], 
-                    yerr=data["std_density"],
-                    color=colors[thermoIx % len(colors)],
-                    #fmt="-o", 
-                    capsize=3,
-                    label=f"type {sim_type}, thermo {thermoIx}"
+            PRINT__, PLOT__ = True, True
+
+            if PRINT__:
+                print("observables_meta", observables_meta)
+                print("observables", observables)
+                print("Careful: trimmed to min length:", min_len, ". Max length:", max_len)
+            if PLOT__:
+                plot1D(
+                    Y=obs_list_trimmed,
+                    title=PEstr,
+                    xlabel="X",
+                    ylabel=PEstr,
+                    labels=[f"{observables_meta[ix]['seed']} type {observables_meta[ix]['sim_type']}" \
+                            for ix in range(len(obs_list_trimmed))],
+                    colors=[colorByType(observables_meta[ix]['sim_type']) \
+                            for ix in range(len(obs_list_trimmed))]
                 )
-            plt.xlabel("pe_o")
-            plt.ylabel("Density ± std (across seeds)")
-            plt.title("Histogram densities of pe_o by sim_type and thermoIx")
-            plt.legend()
-            plt.tight_layout()
-            plt.savefig("peo_density_by_type_thermo.png", dpi=300)
-            #plt.show()
-            plt.close()
 
-            plt.figure(figsize=(10, 6))
-            for seed, subdf in subdf_group.groupby("seed"):
-                data = subdf["pe_o"].to_numpy()
-                plt.plot(data, label=str(seed)+str(thermoIx))
-            plt.ylabel("pe_o")
-            plt.title("Timesesries of pe_o by seed")
-            plt.legend()
-            plt.tight_layout()
-            plt.savefig("peo_tseries_by_type_thermo.png", dpi=300)
-            #plt.show()
-            plt.close()
+            if PRINT__:
+                print("cumMean_list", cumMean_list)
+            if PLOT__:            
+                plot1D(
+                    Y=cumMean_list,
+                    title=PEstr + " cumulative mean",
+                    xlabel="X",
+                    ylabel=PEstr + " cumulative mean",
+                    labels=[f"{observables_meta[ix]['seed']} type {observables_meta[ix]['sim_type']}" \
+                            for ix in range(len(cumMean_list))],
+                    colors=[colorByType(observables_meta[ix]['sim_type']) \
+                            for ix in range(len(cumMean_list))]
+                )
+
+            if PRINT__:
+                print("type1 stats (mean, std, entropy, num_modes):")
+                print(type1_ens_results["entropy"], type1_ens_results["num_modes"])
+                print("type3 stats (mean, std, entropy, num_modes):")
+                print(type3_ens_results["entropy"], type3_ens_results["num_modes"])
+            if PLOT__:
+                plot1D(
+                    Y=[type1_ens_results["mean"], type3_ens_results["mean"]],
+                    Yerr=[type1_ens_results["std"], type3_ens_results["std"]],
+                    X=[type1_ens_results["bin_centers"], type3_ens_results["bin_centers"]],
+                    title=PEstr + " distribution",
+                    xlabel="X",
+                    ylabel=PEstr + " probability density",
+                    labels=["type 1", "type 3"],
+                    colors=[colorByType(1), colorByType(3)]
+                )
+
+            if PRINT__:
+                pass
+            if PLOT__:
+                plot1D(
+                    Y=acf_list,
+                    title=PEstr + " ACF",
+                    xlabel="Lag",
+                    ylabel="ACF",
+                    labels=[f"{observables_meta[ix]['seed']} type {observables_meta[ix]['sim_type']}" \
+                            for ix in range(len(acf_list))],
+                    colors=[colorByType(observables_meta[ix]['sim_type']) \
+                            for ix in range(len(acf_list))]
+                )
+
+            plt.show()
+            #plt.close()
+
+        #endregion
+
+        #region Paper figures: Validation
+        argPEstr = "replicaIx"
+        PEstr = "replicaIx"
+        if argPEstr in args.figures:
+
+            observables = []
+            observables_meta = []
+            ix = -1
+            for (sim_type, seed), subdf_group in out_df.groupby(["sim_type", "seed"]):
+                ix += 1
+                print(f"Processing sim_type={sim_type}, seed={seed} (group {ix})")
+                #print(subdf_group)
+                observables.append(subdf_group[argPEstr].to_numpy())
+                observables_meta.append({
+                    "sim_type": sim_type,
+                    "seed": seed,})
+
+            # Get cumulative mean and som for each trajectory
+            min_len = min(len(Y) for Y in observables)
+            max_len = max(len(Y) for Y in observables)
+            min_glob = min(Y.min() for Y in observables)
+            max_glob = max(Y.max() for Y in observables)
+            obs_list_trimmed = np.array([Y[:min_len] for Y in observables])
+
+            PRINT__, PLOT__ = True, True
+            if PRINT__:
+                print("observables_meta", observables_meta)
+                print("observables", observables)
+                print("Careful: trimmed to min length:", min_len, ". Max length:", max_len)
+            if PLOT__:
+                plot1D(
+                    Y=obs_list_trimmed,
+                    title=PEstr,
+                    xlabel="X",
+                    ylabel=PEstr,
+                    labels=[f"{observables_meta[ix]['seed']} type {observables_meta[ix]['sim_type']}" \
+                            for ix in range(len(obs_list_trimmed))],
+                    colors=[colorByType(observables_meta[ix]['sim_type']) \
+                            for ix in range(len(obs_list_trimmed))]
+                )
+
+            plt.show()
+            #plt.close()
 
         #endregion
 
@@ -715,7 +912,8 @@ def main(args):
 
 
     if TRAJECTORY_REQUIRED:
-
+            
+       
         #region Paper figures: RMSD
         # if "rmsd" in args.figures:
         #     rmsd_records = []   # <-- needed
@@ -776,121 +974,177 @@ def main(args):
         #endregion
 
         if "obs_mom" in args.figures:
-        
-            GLOBAL_BURNIN = 0
+
+            utilObj = REXFNManager()
+
+            GLOBAL_BURNIN = 1000
+            GLOBAL_END = None
 
             # pick your frame slice once:
-            frames = slice(GLOBAL_BURNIN, 150)   # or slice(GLOBAL_BURNIN, None)
+            frames = slice(GLOBAL_BURNIN, GLOBAL_END)   # or slice(GLOBAL_BURNIN, None)
 
             # define any observable you want:
             def dist_8_298(traj, a1=8, a2=298):
                 return md.compute_distances(traj, [[a1, a2]]).ravel()
 
+            # Get trajectory data: (list of arrays of some observable, and 
+            # metadata containing filepath, n_frames, n_atoms, frames, seed, sim_type)
             FNManager = REXFNManager(args.dir, args.inFNRoots, args.cols)
-
-            (traj_observables, traj_metadata_df) = FNManager.getTrajDataFromAllFiles(
+            (observables, traj_metadata_df) = FNManager.getTrajDataFromAllFiles(
                 dist_8_298,
                 frames=frames,
                 a1=8, a2=298,   # optional; overrides defaults
             )
 
-            print(traj_metadata_df)
+            observables_meta = []
+            for ix, obs in enumerate(observables):
+                observables_meta.append({
+                    "sim_type": traj_metadata_df.iloc[ix]["sim_type"],
+                    "seed": traj_metadata_df.iloc[ix]["seed"],})
 
-            print("traj_observables")
-            print(traj_observables)
-            print("traj_metadata_df")            
-            print(traj_metadata_df)
+            # Get cumulative mean and som for each trajectory
+            min_len = min(len(Y) for Y in observables)
+            max_len = max(len(Y) for Y in observables)
+            min_glob = min(Y.min() for Y in observables)
+            max_glob = max(Y.max() for Y in observables)
+            obs_list_trimmed = np.array([Y[:min_len] for Y in observables])
 
-            # Plot
-            plt.figure(figsize=(10, 6))
-            plt.xlabel("(frames)")
-            plt.ylabel("Observable")
-            plt.title("Observable")
+            cumMean_list = []
+            cumSom_list = []
+            for ix, obs in enumerate(obs_list_trimmed):
+                cumMean, cumSom = cum_scum(obs)
+                cumMean_list.append(cumMean)
+                cumSom_list.append(cumSom)
 
-            utilObj = REXFNManager()
-
-            listOfType1Sims = []
-            listOfType2Sims = []
-
-            utilObj = REXFNManager()
-
-            for i, traj in enumerate(traj_observables):
-                FN = traj_metadata_df.iloc[i]["filepath"]
-                seed, sim_type = utilObj.getSeedAndTypeFromFN(os.path.basename(FN))
-
+            # Get ensemble means and stds across trajectories
+            type1_obs = []
+            type3_obs = []
+            for ix, obs in enumerate(obs_list_trimmed):
+                sim_type = observables_meta[ix]["sim_type"]
                 if int(sim_type) == 1:
-                    listOfType1Sims.append(traj)
+                    type1_obs.append(obs)
+                elif int(sim_type) == 3:
+                    type3_obs.append(obs)
                 else:
-                    listOfType2Sims.append(traj)
+                    sys.exit(f"Unknown sim_type {sim_type} encountered.")
 
-            type1_arr, L1 = stack_pad_nan(listOfType1Sims)
-            type2_arr, L2 = stack_pad_nan(listOfType2Sims)
-
-            print("type1_arr, L1", type1_arr, L1)
-            print("type2_arr, L2", type2_arr, L2)
-
-            type1_mean = np.nanmean(type1_arr, axis=0)
-            type2_mean = np.nanmean(type2_arr, axis=0)
-
-            type1_mom, type1_som = running_mean_and_som(type1_mean)
-            type2_mom, type2_som = running_mean_and_som(type2_mean)
-
-            print("type1_mean", type1_mean)
-            print("type2_mean", type2_mean)
-
-            x = np.arange(len(type1_mom))
-            somStride = 1000
-
-            # plt.plot(type1_mom, label="Type 1 mean", color="black")
-            # plt.plot(type2_mom, label="Type 2 mean", color="red")
-            # plt.errorbar(
-            #     x[::somStride],
-            #     type1_mom[::somStride],
-            #     yerr=type1_som[::somStride],
-            #     fmt='-',
-            #     color='black',
-            #     label='Type 1 MOM'
-            # )
-            # plt.errorbar(
-            #     x[::somStride] + (somStride/8),
-            #     type2_mom[::somStride],
-            #     yerr=type2_som[::somStride],
-            #     fmt='-',
-            #     color='red',
-            #     label='Type 2 MOM'
-            # )
-
-            plt.plot(type1_mom, label="Type 1 MOM", color="black")
-            plt.fill_between(
-                x,
-                (type1_mom - (type1_som/2)),
-                (type1_mom + (type1_som/2)),
-                color="black",
-                alpha=0.3
+            type1_ens_results = ensemble_histogram_plus(
+                type1_obs,
+                density=True,
+                bins=50,
+                obs_range=(min_glob, max_glob)
             )
-            plt.plot(type2_mom, label="Type 2 MOM", color="red")
-            plt.fill_between(
-                x,
-                (type2_mom - (type2_som/2)),
-                (type2_mom + (type2_som/2)),
-                color="red",
-                alpha=0.3
+            type3_ens_results = ensemble_histogram_plus(
+                type3_obs,
+                density=True,
+                bins=50,
+                obs_range=(min_glob, max_glob)
             )
+            print("type1_bin_centers", type1_ens_results["bin_centers"])
+            print("type3_bin_centers", type3_ens_results["bin_centers"])
+            assert np.allclose(type1_ens_results["bin_centers"], type3_ens_results["bin_centers"]), "Bin centers do not match between types."
 
-            plt.legend()
-            plt.grid(True)
-            plt.tight_layout()
+            # Get autocorrelation functions per trajectory
+            acf_list = []
+            fit_curve_list = []
+            tau_opt_list = []
+            for ix, obs in enumerate(obs_list_trimmed):
+                acf, fit_curve, tau_opt = normalized_autocorrelation(obs, max_lag=min_len-1, estimate_tau=True)
+                acf_list.append(acf)
+                fit_curve_list.append(fit_curve)
+                tau_opt_list.append(tau_opt)
 
+            PRINT__, PLOT__ = True, True
+
+            if PRINT__:
+                print("observables_meta", observables_meta)
+                print("observables", observables)
+                print("Careful: trimmed to min length:", min_len, ". Max length:", max_len)
+            if PLOT__:
+                plot1D(obs_list_trimmed,
+                       title="End-to-end distance",
+                       xlabel="Frame",
+                       ylabel=dist_8_298.__name__,
+                       labels=[f"{observables_meta[ix]['seed']} type {observables_meta[ix]['sim_type']}" \
+                               for ix in range(len(obs_list_trimmed))],
+                        colors=[colorByType(observables_meta[ix]['sim_type']) \
+                               for ix in range(len(obs_list_trimmed))]
+                       )
+
+            if PRINT__:
+                print("cumMean_list", cumMean_list)
+            if PLOT__:
+                plot1D(cumMean_list,
+                       title="Cumulative mean of end-to-end distance",
+                       xlabel="Frame",
+                       ylabel=dist_8_298.__name__ + " cumulative mean",
+                       labels=[f"{observables_meta[ix]['seed']} type {observables_meta[ix]['sim_type']}" \
+                               for ix in range(len(cumMean_list))],
+                        colors=[colorByType(observables_meta[ix]['sim_type']) \
+                               for ix in range(len(cumMean_list))]
+                       )
+
+            if PRINT__:    
+                pass
+            if PLOT__:
+                plot1D(cumSom_list,
+                       title="Cumulative standard deviation of the mean of end-to-end distance",
+                       xlabel="Frame",
+                       ylabel=dist_8_298.__name__ + " cumulative som",
+                       labels=[f"{observables_meta[ix]['seed']} type {observables_meta[ix]['sim_type']}" \
+                               for ix in range(len(cumSom_list))],
+                        colors=[colorByType(observables_meta[ix]['sim_type']) \
+                               for ix in range(len(cumSom_list))]
+                       )
+
+            if PRINT__:
+                print("type1 stats (mean, std, entropy, num_modes):")
+                print(type1_ens_results["entropy"], type1_ens_results["num_modes"])
+                print("type3 stats (mean, std, entropy, num_modes):")
+                print(type3_ens_results["entropy"], type3_ens_results["num_modes"])
+            if PLOT__:
+                plot1D([type1_ens_results["mean"], type3_ens_results["mean"]],
+                       X=[type1_ens_results["bin_centers"], type3_ens_results["bin_centers"]],
+                       Yerr=[type1_ens_results["std"], type3_ens_results["std"]],
+                       title="End-to-end distance distribution",
+                       xlabel=dist_8_298.__name__,
+                       ylabel="Probability density",
+                       labels=["type 1", "type 3"],
+                       colors=[colorByType(1), colorByType(3)]
+                       )
+
+            if PRINT__:
+                print("fit_curve_list", fit_curve_list)
+                print("tau_opt_list", tau_opt_list)
+            if PLOT__:
+                plot1D(acf_list,
+                       title="Autocorrelation of end-to-end distance",
+                       xlabel="Lag (frames)",
+                       ylabel="Autocorrelation",
+                       labels=[f"{observables_meta[ix]['seed']} type {observables_meta[ix]['sim_type']}" \
+                               for ix in range(len(acf_list))],
+                        colors=[colorByType(observables_meta[ix]['sim_type']) \
+                               for ix in range(len(acf_list))]
+                       )
+                plot1D(fit_curve_list,
+                       title="Fitted exponential decay to ACF of end-to-end distance",
+                       xlabel="Lag (frames)",
+                       ylabel="Fitted ACF",
+                       labels=[f"{observables_meta[ix]['seed']} type {observables_meta[ix]['sim_type']} (τ={tau_opt_list[ix]:.2f})" \
+                               for ix in range(len(fit_curve_list))],
+                        colors=[colorByType(observables_meta[ix]['sim_type']) \
+                               for ix in range(len(fit_curve_list))]
+                          )
+                
             plt.show()
-            plt.savefig("traj_obs.png")
-            plt.close() 
+            #plt.close()
 
         #region Paper figures: trajectory autocorrelation
         if "traj_eeac" in args.figures:
             
             rex_eff = REXEfficiency(
                 out_df=None,
-                trajectories=traj_observables,
+                trajectories=observables,
                 traj_metadata_df=traj_metadata_df
             )
 
@@ -913,14 +1167,14 @@ def main(args):
 
             utilObj = REXFNManager()
 
-            for i, acf in enumerate(acf_list):
-                FN = (meta_list[i])["filepath"]
+            for ix, acf in enumerate(acf_list):
+                FN = (meta_list[ix])["filepath"]
                 seed, sim_type = utilObj.getSeedAndTypeFromFN(os.path.basename(FN))
                 Color = "black"
                 if int(seed) > 3019999:
                 #if False:
                     Color = "red"
-                plt.plot(acf, color=Color, label=f"Traj {FN} (τ={tau_list[i]:.2f})")
+                plt.plot(acf, color=Color, label=f"Traj {FN} (τ={tau_list[ix]:.2f})")
 
             plt.legend()
             plt.grid(True)

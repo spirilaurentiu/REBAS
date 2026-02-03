@@ -24,25 +24,25 @@ class REXEfficiency:
 
     # Normalized autocorrelation function <x_t x_{t+lag}> / var
     @staticmethod
-    def _normalized_autocorrelation(x, max_lag=None):
+    def _normalized_autocorrelation(Y, max_lag=None):
         """
         Compute the normalized autocorrelation function of a 1D array x.
         Returns:
             acf: array of length max_lag+1 with acf[0] = 1.
         """
-        x = np.asarray(x[100000:], dtype=float)
-        x = x - x.mean()
-        n = x.size
+        Y = np.asarray(Y[100000:], dtype=float)
+        Y = Y - Y.mean()
+        n = Y.size
         if max_lag is None or max_lag >= n:
             max_lag = n - 1
-        var = np.dot(x, x) / n
+        var = np.dot(Y, Y) / n
         if var == 0.0:
             # Signal is constant; define autocorrelation as all ones
             return np.ones(max_lag + 1)
         acf = np.empty(max_lag + 1, dtype=float)
         for lag in range(max_lag + 1):
             # <x_t x_{t+lag}> / var
-            num = np.dot(x[:n - lag], x[lag:]) / (n - lag)
+            num = np.dot(Y[:n - lag], Y[lag:]) / (n - lag)
             acf[lag] = num / var
         return acf
 

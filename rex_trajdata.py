@@ -40,7 +40,14 @@ class REXTrajData:
     #
 
     def get_traj_observable(self, observable="rg", *, frames=None, **kwargs):
-        """ Get observable from trajectory """
+        """ Get observable from trajectory
+        Args:
+            observable (str or callable): Observable to compute. If str, must be a key in self._observables.
+            frames (list or slice, optional): Frames to include. If None, use all frames.
+            **kwargs: Additional arguments to pass to the observable function.
+            Returns:
+            Tuple[np.ndarray, Dict[str, Any]]: Observable values and metadata.
+        """
         
         traj = self.traj[frames] if frames is not None else self.traj
 
