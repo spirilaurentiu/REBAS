@@ -584,15 +584,17 @@ def main(args):
                     out_df = out_df[out_df[col] == val]
         #endregion
 
-        out_df.info()
-        # #print("outf_df info:\n", out_df.info())
+        # out_df.info()
+        # # #print("outf_df info:\n", out_df.info())
 
-        efficiencyMetrics = calculate_pt_diagnostics(out_df)
-        print("Efficiency metrics mixing matrix:")
-        print(efficiencyMetrics['mixing_matrix'])
-        print("Replica exchange rates:")
-        print(efficiencyMetrics['replica_exchange_rate'])
-        exit()
+        # efficiencyMetrics = calculate_pt_diagnostics(out_df)
+        # print("Efficiency metrics mixing matrix:")
+        # M = (efficiencyMetrics['mixing_matrix']).to_numpy()
+        # for row in M:
+        #     print(" ".join(f"{val:6.3f}" for val in row))
+        # print("Replica exchange rates:")
+        # print(efficiencyMetrics['replica_exchange_rate'])
+        # exit()
 
         #region Panda_Study
         # print("out_df:\n", out_df)
