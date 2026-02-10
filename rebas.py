@@ -9,7 +9,7 @@ import pandas as pd
 import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
-#matplotlib.use('Agg')
+matplotlib.use('Agg')
 
 from mystats import *
 
@@ -420,7 +420,7 @@ def plot1D(Y,
             plt.plot(X[ix], Y_series, label=labels[ix],
                     color=colors[ix] if colors else None)
         else:
-            plt.errorbar(X[ix], Y_series, yerr=Yerr[ix], label=labels[ix],
+            plt.errorbar(X[ix], Y_series, yerr=Yerr[ix], label=labels[ix], linestyle="None", marker='.', alpha=0.7,
                     color=colors[ix] if colors else None)
     
     # Plot finishing touches
@@ -544,7 +544,7 @@ def colorByType(sim_type):
 #endregion
 def main(args):
 
-    OUTPUT_REQUIRED, TRAJECTORY_REQUIRED = False, False # default flags
+    OUTPUT_REQUIRED, TRAJECTORY_REQUIRED = True, False # default flags
     
     if args.inFNRoots[0][0:3] == 'out':
         OUTPUT_REQUIRED = True
@@ -671,9 +671,9 @@ def main(args):
         #endregion
 
         #region Paper figures: pe_o
-        argPEstr = "pe_o"
-        PEstr = "PE"
-        if argPEstr in args.figures:
+        argStr = "pe_o"
+        obsStr = "PE"
+        if argStr in args.figures:
 
             observables = []
             observables_meta = []
@@ -682,7 +682,7 @@ def main(args):
                 ix += 1
                 print(f"Processing sim_type={sim_type}, seed={seed} (group {ix})")
                 #print(subdf_group)
-                observables.append(subdf_group[argPEstr].to_numpy())
+                observables.append(subdf_group[argStr].to_numpy())
                 observables_meta.append({
                     "sim_type": sim_type,
                     "seed": seed,})
@@ -745,9 +745,9 @@ def main(args):
             if PLOT__:
                 plot1D(
                     Y=obs_list_trimmed,
-                    title=PEstr,
+                    title=obsStr,
                     xlabel="X",
-                    ylabel=PEstr,
+                    ylabel=obsStr,
                     labels=[f"{observables_meta[ix]['seed']} type {observables_meta[ix]['sim_type']}" \
                             for ix in range(len(obs_list_trimmed))],
                     colors=[colorByType(observables_meta[ix]['sim_type']) \
@@ -759,9 +759,9 @@ def main(args):
             if PLOT__:            
                 plot1D(
                     Y=cumMean_list,
-                    title=PEstr + " cumulative mean",
+                    title=obsStr + " cumulative mean",
                     xlabel="X",
-                    ylabel=PEstr + " cumulative mean",
+                    ylabel=obsStr + " cumulative mean",
                     labels=[f"{observables_meta[ix]['seed']} type {observables_meta[ix]['sim_type']}" \
                             for ix in range(len(cumMean_list))],
                     colors=[colorByType(observables_meta[ix]['sim_type']) \
@@ -778,9 +778,9 @@ def main(args):
                     Y=[type1_ens_results["mean"], type3_ens_results["mean"]],
                     Yerr=[type1_ens_results["std"], type3_ens_results["std"]],
                     X=[type1_ens_results["bin_centers"], type3_ens_results["bin_centers"]],
-                    title=PEstr + " distribution",
+                    title=obsStr + " distribution",
                     xlabel="X",
-                    ylabel=PEstr + " probability density",
+                    ylabel=obsStr + " probability density",
                     labels=["type 1", "type 3"],
                     colors=[colorByType(1), colorByType(3)]
                 )
@@ -790,7 +790,7 @@ def main(args):
             if PLOT__:
                 plot1D(
                     Y=acf_list,
-                    title=PEstr + " ACF",
+                    title=obsStr + " ACF",
                     xlabel="Lag",
                     ylabel="ACF",
                     labels=[f"{observables_meta[ix]['seed']} type {observables_meta[ix]['sim_type']}" \
@@ -804,10 +804,12 @@ def main(args):
 
         #endregion
 
-        #region Paper figures: Validation
-        argPEstr = "replicaIx"
-        PEstr = "replicaIx"
-        if argPEstr in args.figures:
+        #region thermoIx vs replicaIx checks
+        replTherInvDict = {"thermoIx": "replicaIx", "replicaIx": "thermoIx"}
+        if "thermoIx" in args.figures or "replicaIx" in args.figures:
+
+            obsStr = args.figures[0]
+            print(f"Plotting {obsStr}")
 
             observables = []
             observables_meta = []
@@ -816,7 +818,7 @@ def main(args):
                 ix += 1
                 print(f"Processing sim_type={sim_type}, seed={seed} (group {ix})")
                 #print(subdf_group)
-                observables.append(subdf_group[argPEstr].to_numpy())
+                observables.append(subdf_group[obsStr].to_numpy())
                 observables_meta.append({
                     "sim_type": sim_type,
                     "seed": seed,})
@@ -828,27 +830,100 @@ def main(args):
             max_glob = max(Y.max() for Y in observables)
             obs_list_trimmed = np.array([Y[:min_len] for Y in observables])
 
-            PRINT__, PLOT__ = True, True
+            PRINT__, PLOT__ = False, False
             if PRINT__:
                 print("observables_meta", observables_meta)
                 print("observables", observables)
                 print("Careful: trimmed to min length:", min_len, ". Max length:", max_len)
+
             if PLOT__:
+                PLTCHECK_RANGE_START, PLTCHECK_RANGE_END = 22, 220
+                print("CAREFULL: before ploting just taking range:", PLTCHECK_RANGE_START, PLTCHECK_RANGE_END)
+                obs_list_short = np.deepcopy(obs_list_trimmed[:, PLTCHECK_RANGE_START:PLTCHECK_RANGE_END])
+                print("ATENTION ONLY PLOTTING obs_list_short", obs_list_short)
                 plot1D(
-                    Y=obs_list_trimmed,
-                    title=PEstr,
+                    Y=obs_list_short, # ATENTION: only plot first 10 for now to avoid overcrowding,
+                    Yerr=np.zeros_like(obs_list_short), # dummy error bars for now
+                    title=obsStr,
                     xlabel="X",
-                    ylabel=PEstr,
+                    ylabel=obsStr,
                     labels=[f"{observables_meta[ix]['seed']} type {observables_meta[ix]['sim_type']}" \
-                            for ix in range(len(obs_list_trimmed))],
+                            for ix in range(len(obs_list_short))],
                     colors=[colorByType(observables_meta[ix]['sim_type']) \
-                            for ix in range(len(obs_list_trimmed))]
+                            for ix in range(len(obs_list_short))]
                 )
 
-            plt.show()
+            #plt.show()
+            plt.savefig(f"{obsStr}.png")
             #plt.close()
+        #endregion
+
+
+        #region
+        if "rex_eff" in args.figures:
+
+            observables = []
+            observables_meta = []
+            ix = -1
+            for (sim_type, seed, replicaIx), subdf_group in out_df.groupby(["sim_type", "seed", "replicaIx"]):
+                ix += 1
+                print(f"Processing sim_type={sim_type}, seed={seed}, replicaIx={replicaIx} (group {ix})")
+                #print(subdf_group)
+                observables.append(subdf_group["thermoIx"].to_numpy())
+                observables_meta.append({
+                    "sim_type": sim_type,
+                    "seed": seed,
+                    "replicaIx": replicaIx,})
+
+            #print("observables_meta", observables_meta)
+            #print("observables", observables)
+
+            # Get cumulative mean and som for each trajectory
+            min_len = min(len(Y) for Y in observables)
+            max_len = max(len(Y) for Y in observables)
+            min_glob = min(Y.min() for Y in observables)
+            max_glob = max(Y.max() for Y in observables)
+            obs_list_trimmed = np.array([Y[:min_len] for Y in observables])
+
+            for ix, obs in enumerate(obs_list_trimmed):
+                sim_type = observables_meta[ix]["sim_type"]
+                seed = observables_meta[ix]["seed"]
+                replicaIx = observables_meta[ix]["replicaIx"]
+                #print(f"Group {ix}: sim_type={sim_type}, seed={seed}, replicaIx={replicaIx}")
+                #print("thermoIx values:", obs)
+
+            # Count exchange rates
+            exxs = np.zeros(len(obs_list_trimmed), dtype=float)
+            for ix, obs in enumerate(obs_list_trimmed):
+                prevObsVal = -1
+                for fframeIx, obsVal in enumerate(obs):
+                    if obsVal != prevObsVal:
+                        exxs[ix] += 1
+                    prevObsVal = obsVal
+                exxs[ix] -= 1 # first frame is not an exchange
+                exxs[ix] /= obs.shape[0] # normalize
+
+            print("Number of exchanges (thermoIx changes) per trajectory:", exxs)
+
+            plot1D(
+                Y=obs_list_trimmed,
+                Yerr=np.zeros_like(obs_list_trimmed), # dummy error bars for now
+                title=f"thermoIx by replica",
+                xlabel="Index",
+                ylabel="thermoIx",
+                labels=[f"sim_type {observables_meta[ix]['sim_type']}, seed {observables_meta[ix]['seed']}, replica {observables_meta[ix]['replicaIx']}" \
+                        for ix in range(len(observables_meta))],
+                colors=[colorByType(observables_meta[ix]['sim_type']) for ix in range(len(observables_meta))]
+            )
+
+        #plt.show()
+        plt.savefig("thermoIx_by_replica.png")
+        #plt.close()
 
         #endregion
+
+
+
 
         #region Paper figures: Efficiency
         if "tau_ac" in args.figures:
@@ -1056,7 +1131,7 @@ def main(args):
                 fit_curve_list.append(fit_curve)
                 tau_opt_list.append(tau_opt)
 
-            PRINT__, PLOT__ = True, True
+            PRINT__, PLOT__ = False, False
 
             if PRINT__:
                 print("observables_meta", observables_meta)
@@ -1115,6 +1190,8 @@ def main(args):
                        colors=[colorByType(1), colorByType(3)]
                        )
 
+            PRINT__, PLOT__ = True, True
+
             if PRINT__:
                 print("fit_curve_list", fit_curve_list)
                 print("tau_opt_list", tau_opt_list)
@@ -1138,8 +1215,12 @@ def main(args):
                                for ix in range(len(fit_curve_list))]
                           )
                 
-            plt.show()
+            #plt.show()
+            plt.savefig("obs_mom.png")
+            plt.close()       
             #plt.close()
+
+            PRINT__, PLOT__ = False, False
 
         #region Paper figures: trajectory autocorrelation
         if "traj_eeac" in args.figures:
