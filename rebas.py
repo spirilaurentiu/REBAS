@@ -7,9 +7,11 @@ import glob
 from turtle import title
 import pandas as pd
 import numpy as np
+
+import scipy.stats
+
 import matplotlib
 import matplotlib.pyplot as plt
-matplotlib.use('Agg')
 
 from mystats import *
 
@@ -376,9 +378,12 @@ def plot1D(Y,
            title="title",
            xlabel="x",
            ylabel="y",
+           ylim=None,
            labels=None,
+           legend=True,
            colors=None,
-           save_path=None):
+           save_path=None,
+           linestyle="None", marker='.', alpha=0.7):
     """ Plot values of two columns against each other in a line plot.
     Arguments:
         X : array-like for x-axis
@@ -420,13 +425,17 @@ def plot1D(Y,
             plt.plot(X[ix], Y_series, label=labels[ix],
                     color=colors[ix] if colors else None)
         else:
-            plt.errorbar(X[ix], Y_series, yerr=Yerr[ix], label=labels[ix], linestyle="None", marker='.', alpha=0.7,
+            plt.errorbar(X[ix], Y_series, yerr=Yerr[ix], label=labels[ix], linestyle=linestyle, marker=marker, alpha=alpha,
                     color=colors[ix] if colors else None)
     
     # Plot finishing touches
-    plt.legend()
+    if legend == True:
+        plt.legend()
     plt.grid(True)
     plt.tight_layout()
+
+    if ylim is not None:
+        plt.ylim(ylim)
 
     # Save or show
     if save_path:
@@ -544,7 +553,7 @@ def colorByType(sim_type):
 #endregion
 def main(args):
 
-    OUTPUT_REQUIRED, TRAJECTORY_REQUIRED = True, False # default flags
+    OUTPUT_REQUIRED, TRAJECTORY_REQUIRED = False, False # default flags
     
     if args.inFNRoots[0][0:3] == 'out':
         OUTPUT_REQUIRED = True
@@ -570,7 +579,7 @@ def main(args):
                 if os.path.exists(args.outCacheFile):
                     raise FileExistsError(f"Cache file '{args.outCacheFile}' already exists. Use a different name or delete it.")
                 print(f"Writing data to cache: {args.outCacheFile}")
-                out_df.to_pickle(args.outCacheFile)                
+                out_df.to_pickle(args.outCacheFile)
 
         # Apply filters if specified
         if args.filterBy:
@@ -586,15 +595,6 @@ def main(args):
 
         # out_df.info()
         # # #print("outf_df info:\n", out_df.info())
-
-        # efficiencyMetrics = calculate_pt_diagnostics(out_df)
-        # print("Efficiency metrics mixing matrix:")
-        # M = (efficiencyMetrics['mixing_matrix']).to_numpy()
-        # for row in M:
-        #     print(" ".join(f"{val:6.3f}" for val in row))
-        # print("Replica exchange rates:")
-        # print(efficiencyMetrics['replica_exchange_rate'])
-        # exit()
 
         #region Panda_Study
         # print("out_df:\n", out_df)
@@ -687,7 +687,7 @@ def main(args):
                     "sim_type": sim_type,
                     "seed": seed,})
 
-            # Get cumulative mean and som for each trajectory
+            # Get a trimmed version cut at min length
             min_len = min(len(Y) for Y in observables)
             max_len = max(len(Y) for Y in observables)
             min_glob = min(Y.min() for Y in observables)
@@ -804,125 +804,127 @@ def main(args):
 
         #endregion
 
-        #region thermoIx vs replicaIx checks
-        replTherInvDict = {"thermoIx": "replicaIx", "replicaIx": "thermoIx"}
-        if "thermoIx" in args.figures or "replicaIx" in args.figures:
-
-            obsStr = args.figures[0]
-            print(f"Plotting {obsStr}")
-
-            observables = []
-            observables_meta = []
-            ix = -1
-            for (sim_type, seed), subdf_group in out_df.groupby(["sim_type", "seed"]):
-                ix += 1
-                print(f"Processing sim_type={sim_type}, seed={seed} (group {ix})")
-                #print(subdf_group)
-                observables.append(subdf_group[obsStr].to_numpy())
-                observables_meta.append({
-                    "sim_type": sim_type,
-                    "seed": seed,})
-
-            # Get cumulative mean and som for each trajectory
-            min_len = min(len(Y) for Y in observables)
-            max_len = max(len(Y) for Y in observables)
-            min_glob = min(Y.min() for Y in observables)
-            max_glob = max(Y.max() for Y in observables)
-            obs_list_trimmed = np.array([Y[:min_len] for Y in observables])
-
-            PRINT__, PLOT__ = False, False
-            if PRINT__:
-                print("observables_meta", observables_meta)
-                print("observables", observables)
-                print("Careful: trimmed to min length:", min_len, ". Max length:", max_len)
-
-            if PLOT__:
-                PLTCHECK_RANGE_START, PLTCHECK_RANGE_END = 22, 220
-                print("CAREFULL: before ploting just taking range:", PLTCHECK_RANGE_START, PLTCHECK_RANGE_END)
-                obs_list_short = np.deepcopy(obs_list_trimmed[:, PLTCHECK_RANGE_START:PLTCHECK_RANGE_END])
-                print("ATENTION ONLY PLOTTING obs_list_short", obs_list_short)
-                plot1D(
-                    Y=obs_list_short, # ATENTION: only plot first 10 for now to avoid overcrowding,
-                    Yerr=np.zeros_like(obs_list_short), # dummy error bars for now
-                    title=obsStr,
-                    xlabel="X",
-                    ylabel=obsStr,
-                    labels=[f"{observables_meta[ix]['seed']} type {observables_meta[ix]['sim_type']}" \
-                            for ix in range(len(obs_list_short))],
-                    colors=[colorByType(observables_meta[ix]['sim_type']) \
-                            for ix in range(len(obs_list_short))]
-                )
-
-            #plt.show()
-            plt.savefig(f"{obsStr}.png")
-            #plt.close()
-        #endregion
-
-
         #region
         if "rex_eff" in args.figures:
 
             observables = []
             observables_meta = []
+            repl_exxrs = []
+            obs_stds = []
+            obs_skews = []
+            PRINT__, PLOT__ = False, False
+
             ix = -1
+            # We iterate through each group (replica) one by one
             for (sim_type, seed, replicaIx), subdf_group in out_df.groupby(["sim_type", "seed", "replicaIx"]):
                 ix += 1
-                print(f"Processing sim_type={sim_type}, seed={seed}, replicaIx={replicaIx} (group {ix})")
-                #print(subdf_group)
-                observables.append(subdf_group["thermoIx"].to_numpy())
+                #print(f"Processing sim_type={sim_type}, seed={seed}, replicaIx={replicaIx} (group {ix})")
+                
+                # Extract the data for THIS specific replica
+                obs_data = subdf_group["thermoIx"].to_numpy()
+                observables.append(obs_data)
                 observables_meta.append({
                     "sim_type": sim_type,
                     "seed": seed,
-                    "replicaIx": replicaIx,})
+                    "replicaIx": replicaIx
+                })
 
-            #print("observables_meta", observables_meta)
-            #print("observables", observables)
+                # --- Calculate Exchange Rate for this specific replica ---
+                prevObsVal = -1
+                exchanges = 0
+                for obsVal in obs_data:
+                    if prevObsVal != -1 and obsVal != prevObsVal:
+                        exchanges += 1
+                    prevObsVal = obsVal                
+                exchange_rate = exchanges / len(obs_data)
+                repl_exxrs.append(exchange_rate)
+                
+                # --- Standard deviation of the observable for this replica ---
+                obs_std = np.std(obs_data)
+                obs_skew = scipy.stats.skew(obs_data)
+                obs_stds.append(obs_std)
+                obs_skews.append(obs_skew)
 
-            # Get cumulative mean and som for each trajectory
+                # --- Plotting ---
+                PLOT__ = False
+                if PLOT__:
+                    plot1D(
+                        Y=[obs_data], 
+                        X=None,
+                        ylim=(0, 13),
+                        title=f"Replica Trajectory: {sim_type} | Seed {seed} | Rep {replicaIx}\nExch Rate: {exchange_rate:.3f}",
+                        xlabel="Frame",
+                        ylabel="thermoIx (State)",
+                        labels=[f"Rep {replicaIx}"],
+                        colors=[colorByType(sim_type)],
+                        #save_path=f"rex_eff_type_{sim_type}_seed_{seed}_rep_{replicaIx}.png"
+                    )
+                
+                # Show/Close the specific figure for this replica before moving to the next
+                plt.show() 
+                plt.close()
+
+                #matplotlib.use('Agg')        
+                #plt.savefig("thermoIx_by_replica.png")
+
+            # Get a trimmed version cut at min length
             min_len = min(len(Y) for Y in observables)
             max_len = max(len(Y) for Y in observables)
             min_glob = min(Y.min() for Y in observables)
             max_glob = max(Y.max() for Y in observables)
             obs_list_trimmed = np.array([Y[:min_len] for Y in observables])
+            #print(obs_list_trimmed.shape)
 
+
+            cumMean_list = []
+            cumSom_list = []
             for ix, obs in enumerate(obs_list_trimmed):
-                sim_type = observables_meta[ix]["sim_type"]
-                seed = observables_meta[ix]["seed"]
-                replicaIx = observables_meta[ix]["replicaIx"]
-                #print(f"Group {ix}: sim_type={sim_type}, seed={seed}, replicaIx={replicaIx}")
-                #print("thermoIx values:", obs)
+                cumMean, cumSom = cum_scum(obs)
+                cumMean_list.append(cumMean)
+                cumSom_list.append(cumSom)
 
-            # Count exchange rates
-            exxs = np.zeros(len(obs_list_trimmed), dtype=float)
-            for ix, obs in enumerate(obs_list_trimmed):
-                prevObsVal = -1
-                for fframeIx, obsVal in enumerate(obs):
-                    if obsVal != prevObsVal:
-                        exxs[ix] += 1
-                    prevObsVal = obsVal
-                exxs[ix] -= 1 # first frame is not an exchange
-                exxs[ix] /= obs.shape[0] # normalize
+            PRINT__, PLOT__ = False, False
+            if PLOT__:
+                plot1D(
+                    Y=obs_list_trimmed,
+                    title="thermoIx trajectories (trimmed to min length)",
+                    xlabel="Frame Index",
+                    ylabel="thermoIx (State)",
+                    labels=[f"Seed {observables_meta[ix]['seed']} Type {observables_meta[ix]['sim_type']} Rep {observables_meta[ix]['replicaIx']}" \
+                            for ix in range(len(obs_list_trimmed))],
+                    colors=[colorByType(observables_meta[ix]['sim_type']) \
+                            for ix in range(len(obs_list_trimmed))],
+                    ylim=(0, 13),
+                    #save_path="thermoIx_trajectories.png",
+                    linestyle="None", marker='.', alpha=0.7,
+                    legend=False
+                )
+                plt.show() 
+                plt.close()
 
-            print("Number of exchanges (thermoIx changes) per trajectory:", exxs)
+            PRINT__, PLOT__ = True, False
+            if PRINT__:
+                for ix, meta in enumerate(obs_list_trimmed):
+                    sim_type = observables_meta[ix]['sim_type']
+                    seed = observables_meta[ix]['seed']
+                    replicaIx = observables_meta[ix]['replicaIx']
+                    print(f"sim_type={sim_type}, seed={seed}, replicaIx={replicaIx}, exxs: {repl_exxrs[ix]:.3f} std: {obs_stds[ix]:.3f} skew: {obs_skews[ix]:.3f}")
 
-            plot1D(
-                Y=obs_list_trimmed,
-                Yerr=np.zeros_like(obs_list_trimmed), # dummy error bars for now
-                title=f"thermoIx by replica",
-                xlabel="Index",
-                ylabel="thermoIx",
-                labels=[f"sim_type {observables_meta[ix]['sim_type']}, seed {observables_meta[ix]['seed']}, replica {observables_meta[ix]['replicaIx']}" \
-                        for ix in range(len(observables_meta))],
-                colors=[colorByType(observables_meta[ix]['sim_type']) for ix in range(len(observables_meta))]
-            )
-
-        #plt.show()
-        plt.savefig("thermoIx_by_replica.png")
-        #plt.close()
-
+                if PLOT__:
+                    plot1D(
+                        Y=cumSom_list,
+                        title=obsStr + " cumulative running std",
+                        xlabel="Frame",
+                        ylabel=obsStr + " cumulative running std",
+                        #labels=[f"Seed {observables_meta[ix]['seed']} Type {observables_meta[ix]['sim_type']}" \
+                        #        for ix in range(len(cumSom_list))],
+                        legend=False,
+                        colors=[colorByType(observables_meta[ix]['sim_type']) \
+                                for ix in range(len(cumSom_list))]
+                    )            
+                    plt.show()
+                    plt.close()
         #endregion
-
-
 
 
         #region Paper figures: Efficiency
@@ -942,21 +944,6 @@ def main(args):
 
             # Calculate autocorrelation function
             max_lag = 100
-
-            # C_k_t_df = rexEff.compute_autocorrelation(max_lag) # per replica
-            # colors = ["black", "maroon", "red", "orange", "yellow", "green", "cyan", "blue", "violet",]
-            # plt.figure(figsize=(10, 6))
-            # plt.ylabel("C_k_t")
-            # plt.title("C_k_t")
-            # plt.tight_layout()
-            # subdfIx = -1
-            # for (seed, replicaIx), subdf in C_k_t_df.groupby(["seed", "replicaIx"]):
-            #     subdfIx += 1
-            #     C_k_t = subdf[("autocorrelation")].values
-            #     plt.plot(C_k_t, color=colors[subdfIx // num_replicas], label=seed)
-            # plt.legend()
-            # plt.savefig("C_k_t.png", dpi=300)
-            # plt.close()
 
             C_t_df = rexEff.compute_mean_autocorrelation(max_lag) # mean among the replicas
 
@@ -989,7 +976,6 @@ def main(args):
 
 
     if TRAJECTORY_REQUIRED:
-            
        
         #region Paper figures: RMSD
         # if "rmsd" in args.figures:
@@ -1023,38 +1009,11 @@ def main(args):
         #     plt.close()
         #endregion
 
-        #region Paper figures: Observables
-        #  if "obs" in args.figures:
-        #     print("traj_observables")
-        #     print(traj_observables)
-        #     print("traj_metadata_df")            
-        #     print(traj_metadata_df)
-        #     # Plot
-        #     plt.figure(figsize=(10, 6))
-        #     plt.xlabel("(frames)")
-        #     plt.ylabel("Observable")
-        #     plt.title("Observable")
-        #     utilObj = REXFNManager()
-        #     for i, traj in enumerate(traj_observables):
-        #         FN = (traj_metadata_df.iloc[i])["filepath"]
-        #         seed, sim_type = utilObj.getSeedAndTypeFromFN(os.path.basename(FN))
-        #         Color = "black"
-        #         if int(seed) > 3019999:
-        #             Color = "red"
-        #         plt.plot(traj, color=Color, label=f"Traj {FN}")
-        #     plt.legend()
-        #     plt.grid(True)
-        #     plt.tight_layout()
-        #     # plt.show()
-        #     plt.savefig("traj_obs.png")
-        #     plt.close() 
-        #endregion
-
-        if "obs_mom" in args.figures:
+        if "traj_stats" in args.figures:
 
             utilObj = REXFNManager()
 
-            GLOBAL_BURNIN = 1000
+            GLOBAL_BURNIN = 0
             GLOBAL_END = None
 
             # pick your frame slice once:
@@ -1131,11 +1090,11 @@ def main(args):
                 fit_curve_list.append(fit_curve)
                 tau_opt_list.append(tau_opt)
 
-            PRINT__, PLOT__ = False, False
+            PRINT__, PLOT__ = True, True
 
             if PRINT__:
                 print("observables_meta", observables_meta)
-                print("observables", observables)
+                #print("observables", observables)
                 print("Careful: trimmed to min length:", min_len, ". Max length:", max_len)
             if PLOT__:
                 plot1D(obs_list_trimmed,
@@ -1149,7 +1108,8 @@ def main(args):
                        )
 
             if PRINT__:
-                print("cumMean_list", cumMean_list)
+                pass
+                #print("cumMean_list", cumMean_list)
             if PLOT__:
                 plot1D(cumMean_list,
                        title="Cumulative mean of end-to-end distance",
@@ -1193,7 +1153,7 @@ def main(args):
             PRINT__, PLOT__ = True, True
 
             if PRINT__:
-                print("fit_curve_list", fit_curve_list)
+                #print("fit_curve_list", fit_curve_list)
                 print("tau_opt_list", tau_opt_list)
             if PLOT__:
                 plot1D(acf_list,
@@ -1215,10 +1175,9 @@ def main(args):
                                for ix in range(len(fit_curve_list))]
                           )
                 
-            #plt.show()
-            plt.savefig("obs_mom.png")
+            plt.show()
+            #plt.savefig("obs_mom.png")
             plt.close()       
-            #plt.close()
 
             PRINT__, PLOT__ = False, False
 

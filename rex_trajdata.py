@@ -16,7 +16,7 @@ class REXTrajData:
         self.filepath = filepath
         self.topology = topology
         self.traj = self._load_trajectory()
-        
+                
         self._observables = {
             "distance": lambda t, pair: md.compute_distances(t, [pair]).ravel(),
             "rg": lambda t: md.compute_rg(t),
