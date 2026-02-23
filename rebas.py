@@ -9,6 +9,7 @@ import pandas as pd
 import numpy as np
 
 import scipy.stats
+from scipy.signal import find_peaks
 
 import matplotlib
 import matplotlib.pyplot as plt
@@ -40,13 +41,6 @@ class REXFNManager:
         FNRoots: File prefixes
         SELECTED_COLUMNS: columns selected to be read from file
     """
-    # def __init__(self, dir=None, FNRoots=None, SELECTED_COLUMNS=None):
-    #     self.dir = dir
-    #     self.FNRoots = FNRoots
-    #     self.SELECTED_COLUMNS = SELECTED_COLUMNS
-    #     self.OUTPUT_DATA = False
-    #     self.TRAJECTORY_DATA = False
-    # #
     def __init__(self, dir=None, FNRoots=None, SELECTED_COLUMNS=None, topology="trpch/ligand.prmtop"):
         self.dir = dir
         self.FNRoots = FNRoots
@@ -224,7 +218,7 @@ class REXFNManager:
     #
     
     # Write restart files into self.dir/restDir/restDir.<seed>
-    def write_restarts_from_trajectories(self, restDir, topology, out_ext='rst7', dry=False):
+    def write_restarts_from_trajectories(self, restDir, topology, out_ext='rst7', dry=True):
         """ Read trajectory files of the form <mol>_<seed>.<replica>.dcd from self.dir,
         extract the last frame, and write restart files into self.dir/restDir/restDir.<seed>.
         Arguments:
@@ -232,6 +226,7 @@ class REXFNManager:
             topology: Path to a topology file (AMBER prmtop or PDB) required to read the DCDs
             out_ext : Output extension/format. 'rst7' (default) requires ParmEd; if
                       ParmEd is unavailable, a PDB will be written instead.
+            dry     : If True, do not actually write files, just print what would be done.
         Output:
             For each trajectory file <mol>_<seed>.<replica>.dcd, writes:
                 self.dir/restDir/restDir.<seed>/<mol>_<seed>.<replica>.<out_ext>
@@ -258,9 +253,15 @@ class REXFNManager:
                 continue
 
             # Create per-seed subdirectory: restDir/restDir.<seed>
-            seed_dir = os.path.join(self.dir, restDir, f"{restDir}.{seed}")
+            #seed_dir = os.path.join(self.dir, restDir, f"{seed}")
+            seed_dir = os.path.join(restDir, f"{seed}")
+            print(f"Creating seed directory: {seed_dir} ...", end=' ', flush=True)
+
             if not dry:
                 os.makedirs(seed_dir, exist_ok=True)
+                print("done.", flush=True)
+            else:
+                print()
 
             try:
                 # Load trajectory with topology
@@ -285,15 +286,33 @@ class REXFNManager:
                         struct.box = lengths + angles
 
                     out_path = os.path.join(seed_dir, f"ligand.s{replica}.rst7")
-                    if not dry: struct.save(out_path, overwrite=True)
+                    print(f"Writing restart file: {out_path} ... ", end='', flush=True)
+                    
+                    if not dry:
+                        struct.save(out_path, overwrite=True)
+                        print("done.", flush=True)
+                    else:
+                        print()
 
                 elif ext == 'pdb':
                     out_path = os.path.join(seed_dir, f"ligand.s{replica}.pdb")
-                    if not dry: last.save_pdb(out_path)
+                    print(f"Writing restart file: {out_path} ... ", end='', flush=True)
+
+                    if not dry:
+                        last.save_pdb(out_path)
+                        print("done.", flush=True)
+                    else:
+                        print()
 
                 else:
                     out_path = os.path.join(seed_dir, f"ligand.s{replica}.pdb")
-                    if not dry: last.save_pdb(out_path)
+                    print(f"Writing restart file: {out_path} ... ", end='', flush=True)
+
+                    if not dry:
+                        last.save_pdb(out_path)
+                        print("done.", flush=True)
+                    else:
+                        print()
 
                 print(f"Wrote restart: {out_path}")
 
@@ -512,9 +531,6 @@ def plot_histogram(hist_dict, title="title", xlabel="x", ylabel="Density", save_
     plt.close()
 #
 
-from scipy.signal import find_peaks
-
-
 def stack_pad_nan(traj_obs_list):
     max_len = max(len(x) for x in traj_obs_list)
     arr = np.full((len(traj_obs_list), max_len), np.nan, dtype=float)
@@ -554,7 +570,6 @@ def colorByType(sim_type):
 def main(args):
 
     OUTPUT_REQUIRED, TRAJECTORY_REQUIRED = False, False # default flags
-    
     if args.inFNRoots[0][0:3] == 'out':
         OUTPUT_REQUIRED = True
     else:
@@ -565,7 +580,7 @@ def main(args):
 
     if OUTPUT_REQUIRED:
 
-        GLOBAL_BURNIN = 0
+        GLOBAL_BURNIN = 1000
 
         #region Read output from all files
         if args.useCache and os.path.exists(args.outCacheFile):
@@ -883,7 +898,7 @@ def main(args):
                 cumMean_list.append(cumMean)
                 cumSom_list.append(cumSom)
 
-            PRINT__, PLOT__ = False, False
+            PRINT__, PLOT__ = False, True
             if PLOT__:
                 plot1D(
                     Y=obs_list_trimmed,
@@ -1013,7 +1028,7 @@ def main(args):
 
             utilObj = REXFNManager()
 
-            GLOBAL_BURNIN = 0
+            GLOBAL_BURNIN = 1000
             GLOBAL_END = None
 
             # pick your frame slice once:
