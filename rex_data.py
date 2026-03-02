@@ -19,6 +19,7 @@ class REXData:
             data_rows = []
 
             with open(self.filepath, 'r') as inF:
+                print(f"Loading REX data from {self.filepath}...")
                 lix = -1
                 for line in inF:
                     lix += 1

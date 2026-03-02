@@ -580,7 +580,7 @@ def main(args):
 
     if OUTPUT_REQUIRED:
 
-        GLOBAL_BURNIN = 1000
+        GLOBAL_BURNIN = 0
 
         #region Read output from all files
         if args.useCache and os.path.exists(args.outCacheFile):
@@ -861,7 +861,7 @@ def main(args):
                 obs_skews.append(obs_skew)
 
                 # --- Plotting ---
-                PLOT__ = False
+                PLOT__ = True
                 if PLOT__:
                     plot1D(
                         Y=[obs_data], 
@@ -898,7 +898,7 @@ def main(args):
                 cumMean_list.append(cumMean)
                 cumSom_list.append(cumSom)
 
-            PRINT__, PLOT__ = False, True
+            PRINT__, PLOT__ = False, False
             if PLOT__:
                 plot1D(
                     Y=obs_list_trimmed,
