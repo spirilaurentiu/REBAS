@@ -22,6 +22,13 @@ from rex_trajdata import REXTrajData
 
 
 # -----------------------------------------------------------------------------
+#                      Utility Functions
+#region Utility Functions ----------------------------------------------------
+
+#endregion --------------------------------------------------------------------
+
+
+# -----------------------------------------------------------------------------
 #                      Robosample file manager
 #region REXFileManager --------------------------------------------------------
 import MDAnalysis as mda
@@ -57,7 +64,9 @@ class REXFNManager:
         seed, sim_type = -1, -1
 
         if FN.startswith("out."):
-            match = re.match(r"out\.(\d{7})", FN)
+            #match = re.match(r"out\.(\d{7})", FN)
+            #match = re.match(r"out\..*\.(\d{7})", FN)
+            match = re.match(r"out\.(?:.*\.)?(\d{7})$", FN)
             if not match: raise ValueError(f"Filename '{FN}' does not match expected format 'out.<7-digit-seed>'")
 
             seed = match.group(1)
@@ -580,7 +589,7 @@ def main(args):
 
     if OUTPUT_REQUIRED:
 
-        GLOBAL_BURNIN = 0
+        GLOBAL_BURNIN = 5000
 
         #region Read output from all files
         if args.useCache and os.path.exists(args.outCacheFile):
@@ -826,7 +835,11 @@ def main(args):
             observables_meta = []
             repl_exxrs = []
             obs_stds = []
+            obs_vars = []
+            obs_statisticalEnergys = []
             obs_skews = []
+            obs_taus = []
+            obs_ESSs = []
             PRINT__, PLOT__ = False, False
 
             ix = -1
@@ -856,18 +869,37 @@ def main(args):
                 
                 # --- Standard deviation of the observable for this replica ---
                 obs_std = np.std(obs_data)
+                obs_var = np.var(obs_data)
                 obs_skew = scipy.stats.skew(obs_data)
                 obs_stds.append(obs_std)
+                obs_vars.append(obs_var)
                 obs_skews.append(obs_skew)
 
+                # --- Calculate Autocorrelation Time (Integrated) ---
+                #obs_tau = calculate_iat(obs_data)
+                #print("obs_tau", obs_tau)
+                (ACF_rho, obs_tau, ess) = autocorr2_revised(obs_data, lag_fraction=0.5, max_lag=50000)
+                #print("obs_tau", obs_tau)
+                #(ACF_rho, obs_tau, ess) = autocorr3_revised(obs_data, lag_fraction=0.5, max_lag=50000)
+                #print("obs_tau", obs_tau)
+
+                obs_taus.append(obs_tau)
+                
+                obs_statisticalEnergy = obs_std / (obs_tau)
+                obs_statisticalEnergy *= 1000  # scale to make more readable
+                obs_statisticalEnergy = obs_statisticalEnergy**2
+                obs_statisticalEnergys.append(obs_statisticalEnergy)
+
+                obs_ESSs.append(ess)
+
                 # --- Plotting ---
-                PLOT__ = True
+                PLOT__ = False
                 if PLOT__:
                     plot1D(
                         Y=[obs_data], 
                         X=None,
                         ylim=(0, 13),
-                        title=f"Replica Trajectory: {sim_type} | Seed {seed} | Rep {replicaIx}\nExch Rate: {exchange_rate:.3f}",
+                        title=f"Replica Trajectory: {sim_type} | Seed {seed} | Rep {replicaIx}\n:exx {exchange_rate:.3f}",
                         xlabel="Frame",
                         ylabel="thermoIx (State)",
                         labels=[f"Rep {replicaIx}"],
@@ -923,7 +955,9 @@ def main(args):
                     sim_type = observables_meta[ix]['sim_type']
                     seed = observables_meta[ix]['seed']
                     replicaIx = observables_meta[ix]['replicaIx']
-                    print(f"sim_type={sim_type}, seed={seed}, replicaIx={replicaIx}, exxs: {repl_exxrs[ix]:.3f} std: {obs_stds[ix]:.3f} skew: {obs_skews[ix]:.3f}")
+                    print(f"sim_type={sim_type}, seed={seed},replicaIx={replicaIx}," + 
+                          f" exxs: {repl_exxrs[ix]:.3f} stds: {obs_stds[ix]:.3f} skew: {obs_skews[ix]:.3f}," + 
+                          f" tau: {obs_taus[ix]:.3f} statEnergy: {obs_statisticalEnergys[ix]:.9f}")
 
                 if PLOT__:
                     plot1D(
@@ -1028,7 +1062,7 @@ def main(args):
 
             utilObj = REXFNManager()
 
-            GLOBAL_BURNIN = 1000
+            GLOBAL_BURNIN = 10
             GLOBAL_END = None
 
             # pick your frame slice once:

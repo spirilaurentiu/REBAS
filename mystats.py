@@ -239,3 +239,106 @@ def calculate_pt_diagnostics(out_df):
         "total_swaps": total_swaps
     }
 #
+
+
+#region Autocorrelation Functions ---------------------------------------------------
+
+# Calculates Integrated Autocorrelation Time (Sokal's method)
+def getTau(ACF_rho, window_factor = 5):
+    """ Calculates Integrated Autocorrelation Time (Sokal's method).
+    Sum until the window is ~5x the current estimate of tau.
+        Arguments:
+            ACF_rho : array-like
+            window_factor : int : safety floor to prevent stopping too early (default=5)
+        Returns:
+            float : estimated integrated autocorrelation time
+    """
+    # 1 + 2 * sum(rho)
+    # Using a running sum to find the self-consistent window
+    tau_est = 1.0
+    for aIx in range(1, len(ACF_rho)):
+        tau_est += 2 * ACF_rho[aIx]
+
+        #print(ACF_rho[aIx], tau_est, window_factor, window_factor * tau_est) # Debug: print the ACF values used in the sum
+
+        if ACF_rho[aIx] <= 0.1:
+            break
+
+        if ACF_rho[aIx] < 0.2:
+            if aIx > (window_factor * tau_est):
+                break
+
+        # Warning if we hit the end of the array without 'breaking'
+        if aIx == len(ACF_rho) - 1:
+            print("Warning: Tau estimation did not converge within the provided lags.")
+
+    return tau_est
+
+# Helper to determine the actual number of lags to compute
+def get_num_lags(N, lag_fraction, max_lag):
+    """ Helper to determine the actual number of lags to compute.
+        Arguments:
+            N   :   int
+            lag_fraction : float
+            max_lag : int
+        Returns:
+            int : number of lags to compute
+    """
+    limit = int(N * lag_fraction)
+    lag_limit = min(limit, max_lag)
+    return lag_limit
+#
+
+def autocorr2_revised(data, lag_fraction=0.1, max_lag=5000):
+    """ Manual: Loop-based (Slow for large max_lag)
+    """
+    N = len(data)
+    xp = data - np.mean(data)
+    var = np.var(data)
+    max_lag = get_num_lags(N, lag_fraction, max_lag)
+    
+    # Calculate ACF up to num_lags
+    ACF_rho = np.array([np.sum(xp[l:] * xp[:N-l]) / (N * var) for l in range(max_lag)])
+    
+    tau = getTau(ACF_rho)
+    ess = N / tau
+
+    return (ACF_rho, tau, ess)
+
+def autocorr3_revised(data, lag_fraction=0.5, max_lag=5000):
+    """FFT: Padded (Linear Correlation) - Best for max_lag=5000"""
+    N = len(data)
+    xp = data - np.mean(data)
+    var = np.var(data)
+    max_lag = get_num_lags(N, lag_fraction, max_lag)
+    
+    # Pad to power of 2 for FFT speed and to avoid circular wrap-around
+    fsize = 2**np.ceil(np.log2(2*N-1)).astype(int)
+    cf = np.fft.fft(xp, fsize)
+    sf = cf.conjugate() * cf
+    
+    # Inverse FFT to get the correlation
+    res = np.fft.ifft(sf).real
+    # Normalize and slice to the requested lags
+    full_corr = (res[:N] / N) / var
+    ACF_rho = full_corr[:max_lag]
+    
+    tau = getTau(ACF_rho)
+    ess = N / tau
+    
+    return (ACF_rho, tau, ess)
+
+def autocorr5_revised(data, lag_fraction=0.5, max_lag=5000):
+    """Numpy Correlate: Optimized C-loop"""
+    N = len(data)
+    xp = data - np.mean(data)
+    var = np.var(data)
+    num_lags = get_num_lags(N, lag_fraction, max_lag)
+    
+    # np.correlate provides the full linear correlation
+    raw_corr = np.correlate(xp, xp, mode='full')[N-1:]
+    corr = (raw_corr[:num_lags] / N) / var
+    
+    return corr, getTau(corr)
+
+#endregion # autocorrelation functions ---------------------------------------------------

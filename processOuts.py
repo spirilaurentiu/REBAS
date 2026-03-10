@@ -16,7 +16,7 @@ args = parser.parse_args()
 #endregion # Parse arguments
 
 # Get all files in the specified directory that match the given roots
-def find_files(dir, inFNRoots):
+def find_files(dir, inFNRoots, heavyPrinting=False):
     """
     Find all files in the specified directory that match the given roots.
 
@@ -27,25 +27,40 @@ def find_files(dir, inFNRoots):
     Returns:
         list of str: The list of matching file paths.
     """
+    fullFNs = []
+    dirs = []
     FNs = []
     suffixes = []
     for root in inFNRoots:
         matched = glob.glob(os.path.join(dir, root + '*'))
-        FNs.extend(matched)
-        FNs_split = [FN.replace('/', '.').replace('.', ' ').split() for FN in FNs]
+        fullFNs.extend(matched)
+        dirs = [os.path.dirname(FN) for FN in fullFNs]
+        FNs = [FN.replace('/', ' ').split()[-1] for FN in fullFNs]
+        FNs_split = [FN.replace('.', ' ').split() for FN in FNs]
         suffixes = [FN[-1] for FN in FNs_split]
-        recovered_roots = [FN[-2] for FN in FNs_split]
+        recovered_roots = [FN[0] for FN in FNs_split]
+
+        if heavyPrinting:
+            print("matched:", matched)
+            print("fullFNs:", fullFNs)
+            print("dirs:", dirs)
+            print("FNs:", FNs)
+            print("FNs_split:", FNs_split)
+            print("suffixes:", suffixes)
+
+        if any([len(FN) > 2 for FN in FNs_split]):
+            pass
 
         if any(recovered_root != root for recovered_root in recovered_roots):
-            print(f"Error: Some recovered roots do not match the original root '{root}'", file=sys.stderr)
-            print(root, recovered_roots)
+            print("Roots should be of type 'root.suffix' and the recovered root should match the original root.", file=sys.stderr)
+            print(f"root=|{root}|, recovered_roots={recovered_roots}", file=sys.stderr)
             sys.exit(1)
 
     return (FNs, recovered_roots, suffixes)
 
 # Process file
 def process_rex(inFN, outFN, StartsWith_Pattern="REXdetails", dry = True):
-    """Process the input file and write the results to the output file.
+    """ Process the input file and write the results to the output file.
 
     Args:
         inFN (str): The input file name.
@@ -53,9 +68,9 @@ def process_rex(inFN, outFN, StartsWith_Pattern="REXdetails", dry = True):
         StartsWith_Pattern (str): The pattern to search for in each line.
     """
 
-    # if(dry == False):
-    #     print("Error: Still in development. Writing files not allowed yet.", file=sys.stderr)
-    #     return
+    if(dry == False):
+       print("Error: Still in development. Writing files not allowed yet.", file=sys.stderr)
+       return
 
     if not os.path.exists(inFN):
         print(f"Error: Input file {inFN} not found.", file=sys.stderr)
@@ -195,7 +210,7 @@ def process_rex(inFN, outFN, StartsWith_Pattern="REXdetails", dry = True):
 
 if __name__ == "__main__":
 
-    FNs, recovered_roots, suffixes = find_files(args.dir, args.inFNRoots)
+    FNs, recovered_roots, suffixes = find_files(args.dir, args.inFNRoots, heavyPrinting=True)
 
     print(FNs)
     print(recovered_roots)
@@ -203,11 +218,13 @@ if __name__ == "__main__":
 
     for rIx, reroot in enumerate(recovered_roots):
         inFN = os.path.join( args.dir, f"{reroot}.{suffixes[rIx]}")
-        outFN = os.path.join(args.dir, f"{reroot}.{suffixes[rIx]}.{args.procSuffix}")
+
+        print(inFN, FNs[rIx])
+
+        outFN = os.path.join(args.dir, f"{reroot}.{args.procSuffix}.{suffixes[rIx]}")
         print(inFN, outFN)
 
         process_rex(inFN, outFN, StartsWith_Pattern="REX", dry=args.dry)
 
 
-    #exit(0)
 
