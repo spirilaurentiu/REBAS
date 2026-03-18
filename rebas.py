@@ -167,6 +167,8 @@ class REXFNManager:
         # enrich meta with filename-derived info
         meta["seed"] = seed
         meta["sim_type"] = sim_type
+        #meta["thermoIx"] = FN.split("repl")[1].split(".")[0]
+        meta["thermoIx"] = re.search(r"repl(\d+)", FN).group(1) if "repl" in FN else None
 
         return obs, meta
     #
@@ -1058,6 +1060,7 @@ def main(args):
         #     plt.close()
         #endregion
 
+        # Objective: Ensemble mean of the cummulative mean for each T
         if "traj_stats" in args.figures:
 
             utilObj = REXFNManager()
@@ -1081,11 +1084,20 @@ def main(args):
                 a1=8, a2=298,   # optional; overrides defaults
             )
 
+            #print("traj_metadata_df:\n", traj_metadata_df)
+            #exit(2)
+
             observables_meta = []
             for ix, obs in enumerate(observables):
                 observables_meta.append({
                     "sim_type": traj_metadata_df.iloc[ix]["sim_type"],
-                    "seed": traj_metadata_df.iloc[ix]["seed"],})
+                    "seed": traj_metadata_df.iloc[ix]["seed"],
+                    "filepath": traj_metadata_df.iloc[ix]["filepath"],
+                    "thermoIx": traj_metadata_df.iloc[ix]["thermoIx"],
+                    })
+
+            #print("observables_meta", observables_meta)
+            #exit(2)
 
             # Get cumulative mean and som for each trajectory
             min_len = min(len(Y) for Y in observables)
@@ -1094,12 +1106,18 @@ def main(args):
             max_glob = max(Y.max() for Y in observables)
             obs_list_trimmed = np.array([Y[:min_len] for Y in observables])
 
+            print("obs_list_trimmed", obs_list_trimmed.shape)
+            #exit(2)
+
             cumMean_list = []
             cumSom_list = []
             for ix, obs in enumerate(obs_list_trimmed):
                 cumMean, cumSom = cum_scum(obs)
                 cumMean_list.append(cumMean)
                 cumSom_list.append(cumSom)
+
+            print("cumMean_list", [cumMean_list_entry.shape for cumMean_list_entry in cumMean_list])
+            exit(2)
 
             # Get ensemble means and stds across trajectories
             type1_obs = []
