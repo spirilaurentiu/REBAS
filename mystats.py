@@ -169,6 +169,7 @@ def ensemble_histogram_plus(traj_obs_list, density=True, bins=50, obs_range=None
         obs_range = (np.min(all_data), np.max(all_data))
     
     hist_list = []
+    bin_edges = None
     for traj_obs in traj_obs_list:
         counts, bin_edges = np.histogram(traj_obs, bins=bins, range=obs_range, density=density)
         hist_list.append(counts)

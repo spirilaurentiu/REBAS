@@ -12,6 +12,7 @@ import scipy.stats
 from scipy.signal import find_peaks
 
 import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 from mystats import *
@@ -739,14 +740,14 @@ def main(args):
                 else:
                     sys.exit(f"Unknown sim_type {sim_type} encountered.")
 
-            type1_ens_results = ensemble_histogram_plus(
+            type1_ens_hists = ensemble_histogram_plus(
                 type1_obs,
                 density=True,
                 bins=50,
                 obs_range=(min_glob, max_glob)
             )
             
-            type3_ens_results = ensemble_histogram_plus(
+            type3_ens_hists = ensemble_histogram_plus(
                 type3_obs,
                 density=True,
                 bins=50,
@@ -754,7 +755,7 @@ def main(args):
             )
             #print("type1_bin_centers", type1_ens_results["bin_centers"])
             #print("type3_bin_centers", type3_ens_results["bin_centers"])
-            assert np.allclose(type1_ens_results["bin_centers"], type3_ens_results["bin_centers"]), "Bin centers do not match between types."
+            assert np.allclose(type1_ens_hists["bin_centers"], type3_ens_hists["bin_centers"]), "Bin centers do not match between types."
 
             # Get autocorrelation functions
             acf_list = []
@@ -796,14 +797,14 @@ def main(args):
 
             if PRINT__:
                 print("type1 stats (mean, std, entropy, num_modes):")
-                print(type1_ens_results["entropy"], type1_ens_results["num_modes"])
+                print(type1_ens_hists["entropy"], type1_ens_hists["num_modes"])
                 print("type3 stats (mean, std, entropy, num_modes):")
-                print(type3_ens_results["entropy"], type3_ens_results["num_modes"])
+                print(type3_ens_hists["entropy"], type3_ens_hists["num_modes"])
             if PLOT__:
                 plot1D(
-                    Y=[type1_ens_results["mean"], type3_ens_results["mean"]],
-                    Yerr=[type1_ens_results["std"], type3_ens_results["std"]],
-                    X=[type1_ens_results["bin_centers"], type3_ens_results["bin_centers"]],
+                    Y=[type1_ens_hists["mean"], type3_ens_hists["mean"]],
+                    Yerr=[type1_ens_hists["std"], type3_ens_hists["std"]],
+                    X=[type1_ens_hists["bin_centers"], type3_ens_hists["bin_centers"]],
                     title=obsStr + " distribution",
                     xlabel="X",
                     ylabel=obsStr + " probability density",
@@ -1106,7 +1107,7 @@ def main(args):
             max_glob = max(Y.max() for Y in observables)
             obs_list_trimmed = np.array([Y[:min_len] for Y in observables])
 
-            print("obs_list_trimmed", obs_list_trimmed.shape)
+            #print("obs_list_trimmed", obs_list_trimmed.shape, flush=True)
             #exit(2)
 
             cumMean_list = []
@@ -1116,8 +1117,8 @@ def main(args):
                 cumMean_list.append(cumMean)
                 cumSom_list.append(cumSom)
 
-            print("cumMean_list", [cumMean_list_entry.shape for cumMean_list_entry in cumMean_list])
-            exit(2)
+            #print("cumMean_list", [cumMean_list_entry.shape for cumMean_list_entry in cumMean_list], flush=True)
+            #exit(2)
 
             # Get ensemble means and stds across trajectories
             type1_obs = []
@@ -1130,22 +1131,42 @@ def main(args):
                     type3_obs.append(obs)
                 else:
                     sys.exit(f"Unknown sim_type {sim_type} encountered.")
+                    
+            # Get ensemble means and stds across trajectories
+            type1_obs_means, type1_obs_stds = [], []
+            type3_obs_means, type3_obs_stds = [], []
+            for ix, cum_mean in enumerate(cumMean_list):
+                sim_type = observables_meta[ix]["sim_type"]
+                if int(sim_type) == 1:
+                    type1_obs_means.append(cum_mean)
+                    type1_obs_stds.append(cumSom_list[ix])
+                elif int(sim_type) == 3:
+                    type3_obs_means.append(cum_mean)
+                    type3_obs_stds.append(cumSom_list[ix])
+                else:
+                    sys.exit(f"Unknown sim_type {sim_type} encountered.")
 
-            type1_ens_results = ensemble_histogram_plus(
+            type1_ens_means, type1_ensemble_stds = ensemble_mean_and_std(type1_obs_means)
+            type3_ens_means, type3_ensemble_stds = ensemble_mean_and_std(type3_obs_means)
+
+            print("type1_ens_means", type1_ens_means.shape, flush=True)
+            print("type1_ensemble_stds", type1_ensemble_stds.shape, flush=True)
+
+            type1_ens_hists = ensemble_histogram_plus(
                 type1_obs,
                 density=True,
                 bins=50,
                 obs_range=(min_glob, max_glob)
             )
-            type3_ens_results = ensemble_histogram_plus(
+            type3_ens_hists = ensemble_histogram_plus(
                 type3_obs,
                 density=True,
                 bins=50,
                 obs_range=(min_glob, max_glob)
             )
-            print("type1_bin_centers", type1_ens_results["bin_centers"])
-            print("type3_bin_centers", type3_ens_results["bin_centers"])
-            assert np.allclose(type1_ens_results["bin_centers"], type3_ens_results["bin_centers"]), "Bin centers do not match between types."
+            print("type1_bin_centers", type1_ens_hists["bin_centers"])
+            print("type3_bin_centers", type3_ens_hists["bin_centers"])
+            assert np.allclose(type1_ens_hists["bin_centers"], type3_ens_hists["bin_centers"]), "Bin centers do not match between types."
 
             # Get autocorrelation functions per trajectory
             acf_list = []
@@ -1164,6 +1185,9 @@ def main(args):
                 #print("observables", observables)
                 print("Careful: trimmed to min length:", min_len, ". Max length:", max_len)
             if PLOT__:
+                plotFN = None
+                if args.useAgg:
+                    plotFN = f"ee.png"                
                 plot1D(obs_list_trimmed,
                        title="End-to-end distance",
                        xlabel="Frame",
@@ -1171,13 +1195,17 @@ def main(args):
                        labels=[f"{observables_meta[ix]['seed']} type {observables_meta[ix]['sim_type']}" \
                                for ix in range(len(obs_list_trimmed))],
                         colors=[colorByType(observables_meta[ix]['sim_type']) \
-                               for ix in range(len(obs_list_trimmed))]
+                               for ix in range(len(obs_list_trimmed))],
+                        save_path=plotFN
                        )
 
             if PRINT__:
                 pass
                 #print("cumMean_list", cumMean_list)
             if PLOT__:
+                plotFN = None
+                if args.useAgg:
+                    plotFN = f"eecm.png"                 
                 plot1D(cumMean_list,
                        title="Cumulative mean of end-to-end distance",
                        xlabel="Frame",
@@ -1185,12 +1213,16 @@ def main(args):
                        labels=[f"{observables_meta[ix]['seed']} type {observables_meta[ix]['sim_type']}" \
                                for ix in range(len(cumMean_list))],
                         colors=[colorByType(observables_meta[ix]['sim_type']) \
-                               for ix in range(len(cumMean_list))]
+                               for ix in range(len(cumMean_list))],
+                        save_path=plotFN
                        )
 
             if PRINT__:    
                 pass
             if PLOT__:
+                plotFN = None
+                if args.useAgg:
+                    plotFN = f"eecs.png"
                 plot1D(cumSom_list,
                        title="Cumulative standard deviation of the mean of end-to-end distance",
                        xlabel="Frame",
@@ -1198,23 +1230,59 @@ def main(args):
                        labels=[f"{observables_meta[ix]['seed']} type {observables_meta[ix]['sim_type']}" \
                                for ix in range(len(cumSom_list))],
                         colors=[colorByType(observables_meta[ix]['sim_type']) \
-                               for ix in range(len(cumSom_list))]
+                               for ix in range(len(cumSom_list))],
+                        save_path=plotFN
+                       )
+
+            if PRINT__:
+                print("type1_ens_means", type1_ens_means.shape)
+                print("type1_ensemble_stds", type1_ensemble_stds.shape)
+            if PLOT__:
+                plotFN = None
+                if args.useAgg:
+                    plotFN = f"eecm_ens.png"
+                plot1D([type1_ens_means, type3_ens_means],
+                       #X=[type1_ens_means, type3_ens_means],
+                       Yerr=[type1_ensemble_stds, type3_ensemble_stds],
+                       title="Ensemble mean of cumulative mean of end-to-end distance",
+                       xlabel="Frame",
+                       ylabel=dist_8_298.__name__ + " ensemble cumulative mean",
+                       labels=["type 1", "type 3"],
+                       colors=[colorByType(1), colorByType(3)],
+                       save_path=plotFN
+                       )
+                plotFN = None
+                if args.useAgg:
+                    plotFN = f"eecs_ens.png"
+                plot1D([type1_ensemble_stds, type3_ensemble_stds],
+                       #X=[type1_ens_means, type3_ens_means],
+                       #Yerr=[type1_ensemble_stds, type3_ensemble_stds],
+                       title="Ensemble mean of cumulative std of the mean of EE distance",
+                       xlabel="Frame",
+                       ylabel=dist_8_298.__name__ + " ensemble cumulative som",
+                       labels=["type 1", "type 3"],
+                       colors=[colorByType(1), colorByType(3)],
+                       save_path=plotFN
                        )
 
             if PRINT__:
                 print("type1 stats (mean, std, entropy, num_modes):")
-                print(type1_ens_results["entropy"], type1_ens_results["num_modes"])
+                print(type1_ens_hists["entropy"], type1_ens_hists["num_modes"])
                 print("type3 stats (mean, std, entropy, num_modes):")
-                print(type3_ens_results["entropy"], type3_ens_results["num_modes"])
+                print(type3_ens_hists["entropy"], type3_ens_hists["num_modes"])
             if PLOT__:
-                plot1D([type1_ens_results["mean"], type3_ens_results["mean"]],
-                       X=[type1_ens_results["bin_centers"], type3_ens_results["bin_centers"]],
-                       Yerr=[type1_ens_results["std"], type3_ens_results["std"]],
+                plotFN = None
+                if args.useAgg:
+                    plotFN = f"ee_dist_distrib.png"
+                plot1D([type1_ens_hists["mean"], type3_ens_hists["mean"]],
+                       X=[type1_ens_hists["bin_centers"], type3_ens_hists["bin_centers"]],
+                       Yerr=[type1_ens_hists["std"], type3_ens_hists["std"]],
                        title="End-to-end distance distribution",
                        xlabel=dist_8_298.__name__,
                        ylabel="Probability density",
                        labels=["type 1", "type 3"],
-                       colors=[colorByType(1), colorByType(3)]
+                       colors=[colorByType(1), colorByType(3)],
+                       save_path=plotFN
                        )
 
             PRINT__, PLOT__ = True, True
@@ -1223,6 +1291,9 @@ def main(args):
                 #print("fit_curve_list", fit_curve_list)
                 print("tau_opt_list", tau_opt_list)
             if PLOT__:
+                plotFN = None
+                if args.useAgg:
+                    plotFN = f"ee_acf.png"
                 plot1D(acf_list,
                        title="Autocorrelation of end-to-end distance",
                        xlabel="Lag (frames)",
@@ -1230,8 +1301,12 @@ def main(args):
                        labels=[f"{observables_meta[ix]['seed']} type {observables_meta[ix]['sim_type']}" \
                                for ix in range(len(acf_list))],
                         colors=[colorByType(observables_meta[ix]['sim_type']) \
-                               for ix in range(len(acf_list))]
+                               for ix in range(len(acf_list))],
+                        save_path=plotFN
                        )
+                plotFN = None
+                if args.useAgg:
+                    plotFN = f"ee_acf_fit.png"
                 plot1D(fit_curve_list,
                        title="Fitted exponential decay to ACF of end-to-end distance",
                        xlabel="Lag (frames)",
@@ -1239,11 +1314,12 @@ def main(args):
                        labels=[f"{observables_meta[ix]['seed']} type {observables_meta[ix]['sim_type']} (τ={tau_opt_list[ix]:.2f})" \
                                for ix in range(len(fit_curve_list))],
                         colors=[colorByType(observables_meta[ix]['sim_type']) \
-                               for ix in range(len(fit_curve_list))]
+                               for ix in range(len(fit_curve_list))],
+                        save_path=plotFN
                           )
-                
-            plt.show()
-            #plt.savefig("obs_mom.png")
+
+            if not args.useAgg:    
+                plt.show()
             plt.close()       
 
             PRINT__, PLOT__ = False, False
@@ -1326,8 +1402,13 @@ if __name__ == "__main__":
     parser.add_argument('--checks', nargs='+', default=[], help='Checks: acceptance, dpe')
 
     parser.add_argument('--figures', nargs='+', default=[], type=str, help='Figures: tau_ac, potentialEnergyDistrib')
+    parser.add_argument('--useAgg', action='store_true', default=False, help="Use Agg backend for matplotlib (no display).")
+    
     args = parser.parse_args()
     #endregion
+
+    if args.useAgg:
+        matplotlib.use('Agg')
 
     main(args)
 
