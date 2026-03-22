@@ -12,7 +12,7 @@ import scipy.stats
 from scipy.signal import find_peaks
 
 import matplotlib
-matplotlib.use('Agg')
+#matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 from mystats import *
@@ -58,11 +58,11 @@ class REXFNManager:
         self.TRAJECTORY_DATA = False
 
     # Get seed and simulation type from filename. Determine if OUT or DCD
-    def getSeedAndTypeFromFN(self, FN):
+    def get_Info_FromFN(self, FN):
         """ Parse filename of type out.<7-digit seed>
         """
 
-        seed, sim_type = -1, -1
+        seed, sim_type, thermo_index = -1, -1, -1
 
         if FN.startswith("out."):
             #match = re.match(r"out\.(\d{7})", FN)
@@ -76,20 +76,25 @@ class REXFNManager:
             self.OUTPUT_DATA = True
 
         elif FN.endswith(".dcd"):
-            pattern = r"([A-Za-z0-9]+)_(\d{7})\.repl\d+\.dcd$"
+            pattern = r"([A-Za-z0-9]+)_(\d{7})\.repl(\d+)\.dcd$"
             match = re.match(pattern, FN)
+
             if not match:
                 raise ValueError(f"Filename '{FN}' does not match expected format'<name_of_the_molecule>_<7-digit-seed>.repl<index>.dcd'")
 
-            print("match", match.group(1), match.group(2))
+            # mIx = 0
+            # for match_group in match.groups():
+            #     print("match group:", mIx, match_group)
+            #     mIx += 1
 
             molName = match.group(1)
             seed = match.group(2)
             sim_type = seed[2]   # third digit
+            thermo_index = match.group(3)
 
             self.TRAJECTORY_DATA = True
 
-        return seed, sim_type
+        return seed, sim_type, thermo_index
     #
 
     # Read data from a single file
@@ -124,7 +129,7 @@ class REXFNManager:
                 print("Reading", filepath, "...", end = ' ', flush=True)
 
                 try:
-                    seed, sim_type = self.getSeedAndTypeFromFN(os.path.basename(filepath))
+                    seed, sim_type = self.get_Info_FromFN(os.path.basename(filepath))
                 except ValueError as e:
                     print(f"Skipping file due to naming error: {filepath}\n{e}", file=sys.stderr)
                     continue
@@ -138,9 +143,8 @@ class REXFNManager:
     #
 
     # Get trajectory data from a single file
-    def getTrajDataFromFile(self, FN, seed, sim_type, observable_fn, *, frames=None, **obs_kwargs):
-        """
-        Get trajectory data from a single file
+    def getTrajDataFromFile(self, FN, seed, sim_type, thermo_index, observable_fn, *, frames=None, **obs_kwargs):
+        """ Get trajectory data from a single file
         :param FN: Filename
         :param seed: seed
         :param sim_type: simulation type
@@ -155,6 +159,9 @@ class REXFNManager:
             - seed
             - sim_type
         """
+        
+        thermodynamicIndex = re.search(r"repl(\d+)", FN).group(1) if "repl" in FN else None
+
         trajData = REXTrajData(FN, topology=self.topology)
 
         obs, meta = trajData.get_traj_observable(
@@ -165,19 +172,17 @@ class REXFNManager:
 
         trajData.clear()
 
-        # enrich meta with filename-derived info
+        # Enrich meta with filename-derived info
         meta["seed"] = seed
         meta["sim_type"] = sim_type
-        #meta["thermoIx"] = FN.split("repl")[1].split(".")[0]
-        meta["thermoIx"] = re.search(r"repl(\d+)", FN).group(1) if "repl" in FN else None
+        meta["thermoIx"] = thermo_index
 
         return obs, meta
     #
 
     # Get trajectory data from all files. Deals with file globbing.
-    def getTrajDataFromAllFiles(self, observable_fn, *, frames=None, **obs_kwargs):
-        """
-        Get trajectory data from all files
+    def getTrajDataFromAllFiles(self, observable_fn, *, filters={}, frames=None, **obs_kwargs):
+        """ Get trajectory data from all files
         
         :param observable_fn: Observable function or key
         :param frames: Frames to include
@@ -190,35 +195,48 @@ class REXFNManager:
             - seed
             - sim_type
         """
+        
         obsList = []
         metadata_rows = []
 
         for FNRoot in self.FNRoots:
             pattern = os.path.join(self.dir, FNRoot + "*")
-            matches = glob.glob(pattern)
+            FN_matches = glob.glob(pattern)
 
-            if not matches:
+            if not FN_matches:
                 print(f"Warning: No files found matching {FNRoot}*", file=sys.stderr)
                 continue
 
-            for filepath in matches:
-                print(f"Reading {filepath} ...", end=" ", flush=True)
+            for FN in FN_matches:
 
                 try:
-                    seed, sim_type = self.getSeedAndTypeFromFN(os.path.basename(filepath))
+                    seed, sim_type, thermo_index = self.get_Info_FromFN(os.path.basename(FN))
                 except ValueError as e:
-                    print(f"[SKIP] Bad filename: {filepath} -> {e}", file=sys.stderr)
+                    print(f"[SKIP] Bad filename: {FN} -> {e}", file=sys.stderr)
                     continue
 
+                # Apply filters (if any)
+                FN_eligible = True
+                for col, val in filters.items():
+                    if   (col == "seed") and (seed != val):
+                        FN_eligible = False
+                    elif (col == "sim_type") and (sim_type != val):
+                        FN_eligible = False
+                    elif (col == "thermoIx") and (int(thermo_index) != val):
+                        FN_eligible = False
+                if not FN_eligible:
+                    continue
+
+                print(f"Reading {FN} ...", end=" ", flush=True)
                 try:
                     obs, meta = self.getTrajDataFromFile(
-                        filepath, seed, sim_type,
+                        FN, seed, sim_type, thermo_index,
                         observable_fn,
                         frames=frames,
                         **obs_kwargs
                     )
                 except Exception as e:
-                    print(f"[FAIL] Error reading {filepath}: {e}", file=sys.stderr)
+                    print(f"[FAIL] Error reading {FN}: {e}", file=sys.stderr)
                     continue
 
                 obsList.append(obs)
@@ -406,6 +424,7 @@ def plotChecks1D(df, col, save_path=None):
 def plot1D(Y,
            X=None,
            Yerr=None,
+           Yerr_every=1,
            title="title",
            xlabel="x",
            ylabel="y",
@@ -456,8 +475,9 @@ def plot1D(Y,
             plt.plot(X[ix], Y_series, label=labels[ix],
                     color=colors[ix] if colors else None)
         else:
-            plt.errorbar(X[ix], Y_series, yerr=Yerr[ix], label=labels[ix], linestyle=linestyle, marker=marker, alpha=alpha,
-                    color=colors[ix] if colors else None)
+            plt.errorbar(X[ix], Y_series, yerr=Yerr[ix], errorevery=Yerr_every,
+                         label=labels[ix], linestyle=linestyle, marker=marker, alpha=alpha,
+                         color=colors[ix] if colors else None)
     
     # Plot finishing touches
     if legend == True:
@@ -1014,9 +1034,6 @@ def main(args):
             plt.show()
             plt.close()
 
-
-
-
             tau_df = rexEff.compute_autocorrelation_time(max_lag) # total autocorrelation time
             print(tau_df)
 
@@ -1028,7 +1045,16 @@ def main(args):
 
 
     if TRAJECTORY_REQUIRED:
-       
+
+        #region Get filters if specified
+        # Get filters if specified
+        filters = {}
+        if args.filterBy:
+            filters = parse_filters(args.filterBy)
+            for col, val in filters.items():
+                print(f"filter: {col} = {val}")
+        #endregion
+
         #region Paper figures: RMSD
         # if "rmsd" in args.figures:
         #     rmsd_records = []   # <-- needed
@@ -1081,6 +1107,7 @@ def main(args):
             FNManager = REXFNManager(args.dir, args.inFNRoots, args.cols)
             (observables, traj_metadata_df) = FNManager.getTrajDataFromAllFiles(
                 dist_8_298,
+                filters=filters,
                 frames=frames,
                 a1=8, a2=298,   # optional; overrides defaults
             )
@@ -1243,7 +1270,7 @@ def main(args):
                     plotFN = f"eecm_ens.png"
                 plot1D([type1_ens_means, type3_ens_means],
                        #X=[type1_ens_means, type3_ens_means],
-                       Yerr=[type1_ensemble_stds, type3_ensemble_stds],
+                       Yerr=[type1_ensemble_stds, type3_ensemble_stds], Yerr_every=10,
                        title="Ensemble mean of cumulative mean of end-to-end distance",
                        xlabel="Frame",
                        ylabel=dist_8_298.__name__ + " ensemble cumulative mean",
@@ -1354,7 +1381,7 @@ def main(args):
 
             for ix, acf in enumerate(acf_list):
                 FN = (meta_list[ix])["filepath"]
-                seed, sim_type = utilObj.getSeedAndTypeFromFN(os.path.basename(FN))
+                seed, sim_type = utilObj.get_Info_FromFN(os.path.basename(FN))
                 Color = "black"
                 if int(seed) > 3019999:
                 #if False:
@@ -1383,7 +1410,7 @@ def main(args):
 if __name__ == "__main__":
 
     #region Parse arguments
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(description='REBAS: Replica Exchange Analysis Script')
     parser.add_argument('--dir', required=True, help='Directory with data files')
     parser.add_argument('--inFNRoots', nargs='+', required=True, help='Robosample processed output file names')
     parser.add_argument('--topology', help='Topology file')

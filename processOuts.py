@@ -1,3 +1,7 @@
+# Process output files from REX simulations:
+# extract relevant information and write it to new files
+# with a specified suffix.
+
 #region Imports
 import os
 import argparse
@@ -7,7 +11,9 @@ import glob
 #region Parse arguments 
 import argparse
 import sys
-parser = argparse.ArgumentParser()
+parser = argparse.ArgumentParser(
+    description="Process REX output files to extract only necessary columns and write it to new files with a specified suffix."
+)
 parser.add_argument('--dir', default=None, help='Directory with input data files')
 parser.add_argument('--inFNRoots', nargs='+', required=True, help='Name roots for input data files')
 parser.add_argument('--procSuffix', help='Suffix to add to output files')
