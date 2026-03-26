@@ -1092,26 +1092,149 @@ def main(args):
 
             utilObj = REXFNManager()
 
-            GLOBAL_BURNIN = 10
+            GLOBAL_BURNIN = 2000
             GLOBAL_END = None
 
             # pick your frame slice once:
             frames = slice(GLOBAL_BURNIN, GLOBAL_END)   # or slice(GLOBAL_BURNIN, None)
 
             # define any observable you want:
-            def dist_8_298(traj, a1=8, a2=298):
+            def dist_atom1_atom2(traj, a1=8, a2=298):
                 return md.compute_distances(traj, [[a1, a2]]).ravel()
+
+            def dihedral_a1_a2_a3_a4(traj, a1=4, a2=6, a3=8, a4=14):
+                return md.compute_dihedrals(traj, [[a1, a2, a3, a4]]).ravel()
+
+            def dihedral_adj_a1_a2_a3_a4_a5(traj, a1=4, a2=6, a3=8, a4=14, a5=16):
+                dihedrals = md.compute_dihedrals(traj, [[a1, a2, a3, a4], [a2, a3, a4, a5]])
+                return (1 - np.cos(dihedrals[:, 0] - dihedrals[:, 1]))
+
+            def quaternion_multiply(q1, q2):
+                """Vectorized quaternion multiplication."""
+                w1, x1, y1, z1 = q1[:,0], q1[:,1], q1[:,2], q1[:,3]
+                w2, x2, y2, z2 = q2[:,0], q2[:,1], q2[:,2], q2[:,3]
+                
+                res = np.array([
+                    w1*w2 - x1*x2 - y1*y2 - z1*z2,
+                    w1*x2 + x1*w2 + y1*z2 - z1*y2,
+                    w1*y2 - x1*z2 + y1*w2 + z1*x2,
+                    w1*z2 + x1*y2 - y1*x2 + z1*w2
+                ]).T
+                return res
+            
+            def dihedral_quat_a1_a2_a3_a4_a5(traj, a1=4, a2=6, a3=8, a4=14, a5=16):
+                """ """
+                phi = md.compute_dihedrals(traj, [[a1, a2, a3, a4]])
+                psi = md.compute_dihedrals(traj, [[a2, a3, a4, a5]])
+                q_phi = np.stack([np.cos(phi/2), np.sin(phi/2), np.zeros_like(phi), np.zeros_like(phi)], axis=-1)
+                q_psi = np.stack([np.cos(psi/2), np.zeros_like(psi), np.sin(psi/2), np.zeros_like(psi)], axis=-1)
+                #combined_q = quaternion_multiply(q_phi, q_psi)
+                inner_q = np.dot(q_phi, q_psi)
+    
+                return inner_q
+
+
+            # ALA1_BASINS = {
+            #     "C5":       {"phi_min": -3.141592654, "phi_max": -1.658062789, "psi_min":  1.8325957145, "psi_max": 3.1415926545},
+            #     "PPII":     {"phi_min": -1.675516081, "phi_max": -0.785398163, "psi_min":  1.8325957145, "psi_max": 3.14159265358979},
+            #     "C7_eq":    {"phi_min": -1.675516081, "phi_max": -0.785398163, "psi_min": -0.436332312998582, "psi_max": 1.8151424220741},
+            #     "alpha_eq": {"phi_min":  0.610865238198015, "phi_max": 1.48352986419518, "psi_min": -3.141592654, "psi_max": 0.436332313}
+            # }
+
+            ALA1_BASINS = {
+                "C5":       {"phi_min": np.deg2rad(-180), "phi_max": np.deg2rad(-95), "psi_min": np.deg2rad(105 ), "psi_max": np.deg2rad(180)},
+                "PPII":     {"phi_min": np.deg2rad(-96 ), "phi_max": np.deg2rad(-45), "psi_min": np.deg2rad(105 ), "psi_max": np.deg2rad(180)},
+                "C7_eq":    {"phi_min": np.deg2rad(-96 ), "phi_max": np.deg2rad(-45), "psi_min": np.deg2rad(-25 ), "psi_max": np.deg2rad(104)},
+                "alpha_eq": {"phi_min": np.deg2rad( 35 ), "phi_max": np.deg2rad( 85), "psi_min": np.deg2rad(-180), "psi_max": np.deg2rad(25)}
+            }
+
+            def assign_basin_states(traj, a1=4, a2=6, a3=8, a4=14, a5=16):
+                # 1. Compute dihedrals for all frames
+                phi = md.compute_dihedrals(traj, [[a1, a2, a3, a4]]).ravel()
+                psi = md.compute_dihedrals(traj, [[a2, a3, a4, a5]]).ravel()
+                
+                # 2. Define the Boolean Masks for each state
+                # C5, PPII, and C7_eq all map to 0
+                is_c5 = (phi >= np.deg2rad(-180)) & (phi <= np.deg2rad(-95)) & \
+                        (psi >= np.deg2rad(105))  & (psi <= np.deg2rad(180))
+                        
+                is_ppii = (phi >= np.deg2rad(-96)) & (phi <= np.deg2rad(-45)) & \
+                        (psi >= np.deg2rad(105)) & (psi <= np.deg2rad(180))
+                        
+                is_c7eq = (phi >= np.deg2rad(-96)) & (phi <= np.deg2rad(-45)) & \
+                        (psi >= np.deg2rad(-25)) & (psi <= np.deg2rad(104))
+                        
+                # alpha_eq maps to 1
+                is_alpha = (phi >= np.deg2rad(35)) & (phi <= np.deg2rad(85)) & \
+                        (psi >= np.deg2rad(-180)) & (psi <= np.deg2rad(25))
+
+                # 3. Combine "0" states
+                state_zero_mask = is_c5 | is_ppii | is_c7eq
+                
+                # 4. Use np.select to assign values
+                # Logic: If in state_zero_mask -> 0.0
+                #        Else if in is_alpha -> 1.0
+                #        Else (default) -> 0.5
+                conditions = [state_zero_mask, is_alpha]
+                choices = [0.0, 1.0]
+                
+                states = np.select(conditions, choices, default=0.5)
+                
+                return states
 
             # Get trajectory data: (list of arrays of some observable, and 
             # metadata containing filepath, n_frames, n_atoms, frames, seed, sim_type)
-            FNManager = REXFNManager(args.dir, args.inFNRoots, args.cols)
+            FNManager = REXFNManager(args.dir, args.inFNRoots, args.cols, topology=args.topology)
+            
+            # (observables, traj_metadata_df) = FNManager.getTrajDataFromAllFiles(
+            #     dist_atom1_atom2,
+            #     filters=filters,
+            #     frames=frames,
+            #     a1=8, a2=298,   # optional; overrides defaults
+            # )
             (observables, traj_metadata_df) = FNManager.getTrajDataFromAllFiles(
-                dist_8_298,
+                assign_basin_states,
                 filters=filters,
                 frames=frames,
-                a1=8, a2=298,   # optional; overrides defaults
+                a1=4, a2=6, a3=8, a4=14, a5=16,  # dihedral_adj_a1_a2_a3_a4_a5
+                #a1=4, a2=6, a3=8, a4=14,  # phi
+                #a1=6, a2=8, a3=14, a4=16,  # psi
             )
 
+            def assign_basin_states(traj, a1=4, a2=6, a3=8, a4=14, a5=16):
+                # 1. Compute dihedrals for all frames
+                phi = md.compute_dihedrals(traj, [[a1, a2, a3, a4]]).ravel()
+                psi = md.compute_dihedrals(traj, [[a2, a3, a4, a5]]).ravel()
+                
+                # 2. Define the Boolean Masks for each state
+                # C5, PPII, and C7_eq all map to 0
+                is_c5 = (phi >= np.deg2rad(-180)) & (phi <= np.deg2rad(-95)) & \
+                        (psi >= np.deg2rad(105))  & (psi <= np.deg2rad(180))
+                        
+                is_ppii = (phi >= np.deg2rad(-96)) & (phi <= np.deg2rad(-45)) & \
+                        (psi >= np.deg2rad(105)) & (psi <= np.deg2rad(180))
+                        
+                is_c7eq = (phi >= np.deg2rad(-96)) & (phi <= np.deg2rad(-45)) & \
+                        (psi >= np.deg2rad(-25)) & (psi <= np.deg2rad(104))
+                        
+                # alpha_eq maps to 1
+                is_alpha = (phi >= np.deg2rad(35)) & (phi <= np.deg2rad(85)) & \
+                        (psi >= np.deg2rad(-180)) & (psi <= np.deg2rad(25))
+
+                # 3. Combine "0" states
+                state_zero_mask = is_c5 | is_ppii | is_c7eq
+                
+                # 4. Use np.select to assign values
+                # Logic: If in state_zero_mask -> 0.0
+                #        Else if in is_alpha -> 1.0
+                #        Else (default) -> 0.5
+                conditions = [state_zero_mask, is_alpha]
+                choices = [0.0, 1.0]
+                
+                states = np.select(conditions, choices, default=0.5)
+                
+                return states
+            
             #print("traj_metadata_df:\n", traj_metadata_df)
             #exit(2)
 
@@ -1218,7 +1341,7 @@ def main(args):
                 plot1D(obs_list_trimmed,
                        title="End-to-end distance",
                        xlabel="Frame",
-                       ylabel=dist_8_298.__name__,
+                       ylabel=dist_atom1_atom2.__name__,
                        labels=[f"{observables_meta[ix]['seed']} type {observables_meta[ix]['sim_type']}" \
                                for ix in range(len(obs_list_trimmed))],
                         colors=[colorByType(observables_meta[ix]['sim_type']) \
@@ -1236,7 +1359,7 @@ def main(args):
                 plot1D(cumMean_list,
                        title="Cumulative mean of end-to-end distance",
                        xlabel="Frame",
-                       ylabel=dist_8_298.__name__ + " cumulative mean",
+                       ylabel=dist_atom1_atom2.__name__ + " cumulative mean",
                        labels=[f"{observables_meta[ix]['seed']} type {observables_meta[ix]['sim_type']}" \
                                for ix in range(len(cumMean_list))],
                         colors=[colorByType(observables_meta[ix]['sim_type']) \
@@ -1253,7 +1376,7 @@ def main(args):
                 plot1D(cumSom_list,
                        title="Cumulative standard deviation of the mean of end-to-end distance",
                        xlabel="Frame",
-                       ylabel=dist_8_298.__name__ + " cumulative som",
+                       ylabel=dist_atom1_atom2.__name__ + " cumulative som",
                        labels=[f"{observables_meta[ix]['seed']} type {observables_meta[ix]['sim_type']}" \
                                for ix in range(len(cumSom_list))],
                         colors=[colorByType(observables_meta[ix]['sim_type']) \
@@ -1273,7 +1396,7 @@ def main(args):
                        Yerr=[type1_ensemble_stds, type3_ensemble_stds], Yerr_every=10,
                        title="Ensemble mean of cumulative mean of end-to-end distance",
                        xlabel="Frame",
-                       ylabel=dist_8_298.__name__ + " ensemble cumulative mean",
+                       ylabel=dist_atom1_atom2.__name__ + " ensemble cumulative mean",
                        labels=["type 1", "type 3"],
                        colors=[colorByType(1), colorByType(3)],
                        save_path=plotFN
@@ -1286,7 +1409,7 @@ def main(args):
                        #Yerr=[type1_ensemble_stds, type3_ensemble_stds],
                        title="Ensemble mean of cumulative std of the mean of EE distance",
                        xlabel="Frame",
-                       ylabel=dist_8_298.__name__ + " ensemble cumulative som",
+                       ylabel=dist_atom1_atom2.__name__ + " ensemble cumulative som",
                        labels=["type 1", "type 3"],
                        colors=[colorByType(1), colorByType(3)],
                        save_path=plotFN
@@ -1305,7 +1428,7 @@ def main(args):
                        X=[type1_ens_hists["bin_centers"], type3_ens_hists["bin_centers"]],
                        Yerr=[type1_ens_hists["std"], type3_ens_hists["std"]],
                        title="End-to-end distance distribution",
-                       xlabel=dist_8_298.__name__,
+                       xlabel=dist_atom1_atom2.__name__,
                        ylabel="Probability density",
                        labels=["type 1", "type 3"],
                        colors=[colorByType(1), colorByType(3)],
