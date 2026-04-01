@@ -1267,7 +1267,18 @@ def main(args):
                 cumMean_list.append(cumMean)
                 cumSom_list.append(cumSom)
 
-            #print("cumMean_list", [cumMean_list_entry.shape for cumMean_list_entry in cumMean_list], flush=True)
+            print("cumMean_list", [cumMean_list_entry.shape for cumMean_list_entry in cumMean_list], flush=True)
+            #exit(2)
+
+            cumRollStd_list = []
+            roll_window = 500
+            for ix, cumMean in enumerate(cumMean_list):
+                cumRollStd = np.array([np.std(cumMean[t - roll_window : t + roll_window]) \
+                                       for t in range(roll_window, len(cumMean) - roll_window)])
+                
+                cumRollStd_list.append(cumRollStd)
+
+            print("cumRollStd_list", [cumRollStd_list_entry.shape for cumRollStd_list_entry in cumRollStd_list], flush=True)
             #exit(2)
 
             # Get ensemble means and stds across trajectories
@@ -1383,6 +1394,24 @@ def main(args):
                                for ix in range(len(cumSom_list))],
                         save_path=plotFN
                        )
+
+            if PRINT__:
+                pass
+            if PLOT__:
+                plotFN = None
+                if args.useAgg:
+                    plotFN = f"eerollstd.png"
+                plot1D(cumRollStd_list,
+                       title="Rolling std (window=100 frames) of the cumulative mean of end-to-end distance",
+                       xlabel="Frame",
+                       ylabel=dist_atom1_atom2.__name__ + " cumulative mean rolling std",
+                       labels=[f"{observables_meta[ix]['seed']} type {observables_meta[ix]['sim_type']}" \
+                               for ix in range(len(cumRollStd_list))],
+                        colors=[colorByType(observables_meta[ix]['sim_type']) \
+                               for ix in range(len(cumRollStd_list))],
+                        save_path=plotFN
+                       )
+
 
             if PRINT__:
                 print("type1_ens_means", type1_ens_means.shape)
