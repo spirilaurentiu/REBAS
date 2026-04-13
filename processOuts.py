@@ -41,7 +41,12 @@ def find_files(dir, inFNRoots, heavyPrinting=False):
         matched = glob.glob(os.path.join(dir, root + '*'))
         fullFNs.extend(matched)
         dirs = [os.path.dirname(FN) for FN in fullFNs]
-        FNs = [FN.replace('/', ' ').split()[-1] for FN in fullFNs]
+        
+        FNs_all = [FN.replace('/', ' ').split()[-1] for FN in fullFNs]
+
+        #print([FN for FN in FNs_all if (FN.replace('.', ' ').split()[1]).isdigit() and (FN.replace('.', ' ').split()[0] == root)])
+        FNs = [FN for FN in FNs_all if (FN.replace('.', ' ').split()[1]).isdigit() and (FN.replace('.', ' ').split()[0] == root)]
+
         FNs_split = [FN.replace('.', ' ').split() for FN in FNs]
         suffixes = [FN[-1] for FN in FNs_split]
         recovered_roots = [FN[0] for FN in FNs_split]
@@ -203,9 +208,11 @@ def process_rex(inFN, outFN, StartsWith_Pattern="REXdetails", dry = True):
                         #print(f"Try {pIx} {cols}")
 
                         if not dry:
-                            outfile.write(f"REX, {replicaIx}, {thermoIx}, {wIx}, {pe_o}, {acc}\n")
+                            #outfile.write(f"REX, {replicaIx}, {thermoIx}, {wIx}, {pe_o}, {acc}\n")
+                            outfile.write(f"REX, {replicaIx}, {thermoIx}, {wIx}, {pe_o}, {pe_n}, {pe_set}, {ke_prop}, {ke_n}, {JDetLog}, {acc}\n")
                         else:
-                            print(        f"REX, {replicaIx}, {thermoIx}, {wIx}, {pe_o}, {acc}")
+                            #print(        f"REX, {replicaIx}, {thermoIx}, {wIx}, {pe_o}, {acc}")
+                            print(        f"REX, {replicaIx}, {thermoIx}, {wIx}, {pe_o}, {pe_n}, {pe_set}, {ke_prop}, {ke_n}, {JDetLog}, {acc}")
                             if(pIx > 10): break
 
                     except IndexError:
@@ -216,11 +223,11 @@ def process_rex(inFN, outFN, StartsWith_Pattern="REXdetails", dry = True):
 
 if __name__ == "__main__":
 
-    FNs, recovered_roots, suffixes = find_files(args.dir, args.inFNRoots, heavyPrinting=True)
+    FNs, recovered_roots, suffixes = find_files(args.dir, args.inFNRoots, heavyPrinting=False)
 
-    print(FNs)
-    print(recovered_roots)
-    print(suffixes)
+    print("FNs:", FNs)
+    print("recovered_roots:", recovered_roots)
+    print("suffixes:", suffixes)
 
     for rIx, reroot in enumerate(recovered_roots):
         inFN = os.path.join( args.dir, f"{reroot}.{suffixes[rIx]}")

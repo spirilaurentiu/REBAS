@@ -46,7 +46,7 @@ class REXData:
                 raise ValueError("No valid REX data rows found.")
 
             df = pd.DataFrame(data_rows, columns=selected_names)
-            df = df.apply(pd.to_numeric, errors='ignore')
+            df = df.apply(pd.to_numeric, errors='coerce')
             return df
 
         except Exception as e:

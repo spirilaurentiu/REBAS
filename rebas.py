@@ -15,12 +15,17 @@ import matplotlib
 #matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
-from mystats import *
+from mystats import LS_Statistics
 
 from rex_data import REXData
 from rex_efficiency import RoboAnalysis, REXEfficiency
 from rex_trajdata import REXTrajData
 
+from rex_fn_manager import REXFNManager
+
+import MDAnalysis as mda
+#from MDAnalysis.coordinates.TRJ import Restart
+import mdtraj as md
 
 # -----------------------------------------------------------------------------
 #                      Utility Functions
@@ -28,328 +33,6 @@ from rex_trajdata import REXTrajData
 
 #endregion --------------------------------------------------------------------
 
-
-# -----------------------------------------------------------------------------
-#                      Robosample file manager
-#region REXFileManager --------------------------------------------------------
-import MDAnalysis as mda
-#from MDAnalysis.coordinates.TRJ import Restart
-import mdtraj as md
-
-try:
-    import parmed as pmd
-    _HAS_PARMED = True
-except Exception:
-    _HAS_PARMED = False
-
-class REXFNManager:
-    """ File manager
-    Attributes:
-        dir: Directory containing the files
-        FNRoots: File prefixes
-        SELECTED_COLUMNS: columns selected to be read from file
-    """
-    def __init__(self, dir=None, FNRoots=None, SELECTED_COLUMNS=None, topology="trpch/ligand.prmtop"):
-        self.dir = dir
-        self.FNRoots = FNRoots
-        self.SELECTED_COLUMNS = SELECTED_COLUMNS
-        self.topology = topology
-        self.OUTPUT_DATA = False
-        self.TRAJECTORY_DATA = False
-
-    # Get seed and simulation type from filename. Determine if OUT or DCD
-    def get_Info_FromFN(self, FN):
-        """ Parse filename of type out.<7-digit seed>
-        """
-
-        seed, sim_type, thermo_index = -1, -1, -1
-
-        if FN.startswith("out."):
-            #match = re.match(r"out\.(\d{7})", FN)
-            #match = re.match(r"out\..*\.(\d{7})", FN)
-            match = re.match(r"out\.(?:.*\.)?(\d{7})$", FN)
-            if not match: raise ValueError(f"Filename '{FN}' does not match expected format 'out.<7-digit-seed>'")
-
-            seed = match.group(1)
-            sim_type = seed[2]  # third digit (0-based index)
-
-            self.OUTPUT_DATA = True
-
-        elif FN.endswith(".dcd"):
-            pattern = r"([A-Za-z0-9]+)_(\d{7})\.repl(\d+)\.dcd$"
-            match = re.match(pattern, FN)
-
-            if not match:
-                raise ValueError(f"Filename '{FN}' does not match expected format'<name_of_the_molecule>_<7-digit-seed>.repl<index>.dcd'")
-
-            # mIx = 0
-            # for match_group in match.groups():
-            #     print("match group:", mIx, match_group)
-            #     mIx += 1
-
-            molName = match.group(1)
-            seed = match.group(2)
-            sim_type = seed[2]   # third digit
-            thermo_index = match.group(3)
-
-            self.TRAJECTORY_DATA = True
-
-        return seed, sim_type, thermo_index
-    #
-
-    # Read data from a single file
-    def getDataFromFile(self, FN, seed, sim_type, burnin=0):
-        """ Read data from file
-        """
-        rex = REXData(FN, self.SELECTED_COLUMNS)
-        df = rex.get_dataframe().copy()
-        df['seed'] = seed
-        df['sim_type'] = sim_type
-
-        # Remove burn-in rows
-        if burnin > 0:
-            df = df.iloc[burnin:].reset_index(drop=True)
-
-        return df
-    #
-
-    # Read data from all files
-    def getDataFromAllFiles(self, burnin=0):
-        """ Grab all out files and read data from them
-        """
-        all_data = []
-        for FNRoot in self.FNRoots:
-            matches = glob.glob(os.path.join(self.dir, FNRoot + "*"))
-            if not matches:
-                print(f"Warning: No files found matching {FNRoot}*", file=sys.stderr)
-                continue
-
-            for filepath in matches:
-
-                print("Reading", filepath, "...", end = ' ', flush=True)
-
-                try:
-                    seed, sim_type = self.get_Info_FromFN(os.path.basename(filepath))
-                except ValueError as e:
-                    print(f"Skipping file due to naming error: {filepath}\n{e}", file=sys.stderr)
-                    continue
-
-                df = self.getDataFromFile(filepath, seed, sim_type, burnin=burnin)
-                all_data.append(df)
-
-                print("done.", flush=True)
-
-        return pd.concat(all_data, ignore_index=True) if all_data else pd.DataFrame()
-    #
-
-    # Get trajectory data from a single file
-    def getTrajDataFromFile(self, FN, seed, sim_type, thermo_index, observable_fn, *, frames=None, **obs_kwargs):
-        """ Get trajectory data from a single file
-        :param FN: Filename
-        :param seed: seed
-        :param sim_type: simulation type
-        :param observable_fn: Observable function or key
-        :param frames: Frames to include
-        :param obs_kwargs: Additional arguments for observable function
-        :return: tuple of (obs, meta) where meta is a dict with keys:
-            - filepath
-            - n_frames
-            - n_atoms
-            - frames
-            - seed
-            - sim_type
-        """
-        
-        thermodynamicIndex = re.search(r"repl(\d+)", FN).group(1) if "repl" in FN else None
-
-        trajData = REXTrajData(FN, topology=self.topology)
-
-        obs, meta = trajData.get_traj_observable(
-            observable_fn,
-            frames=frames,
-            **obs_kwargs
-        )
-
-        trajData.clear()
-
-        # Enrich meta with filename-derived info
-        meta["seed"] = seed
-        meta["sim_type"] = sim_type
-        meta["thermoIx"] = thermo_index
-
-        return obs, meta
-    #
-
-    # Get trajectory data from all files. Deals with file globbing.
-    def getTrajDataFromAllFiles(self, observable_fn, *, filters={}, frames=None, **obs_kwargs):
-        """ Get trajectory data from all files
-        
-        :param observable_fn: Observable function or key
-        :param frames: Frames to include
-        :param obs_kwargs: Additional arguments for observable function
-        :return: list of observable arrays and metadata containing:
-            - filepath
-            - n_frames
-            - n_atoms
-            - frames
-            - seed
-            - sim_type
-        """
-        
-        obsList = []
-        metadata_rows = []
-
-        for FNRoot in self.FNRoots:
-            pattern = os.path.join(self.dir, FNRoot + "*")
-            FN_matches = glob.glob(pattern)
-
-            if not FN_matches:
-                print(f"Warning: No files found matching {FNRoot}*", file=sys.stderr)
-                continue
-
-            for FN in FN_matches:
-
-                try:
-                    seed, sim_type, thermo_index = self.get_Info_FromFN(os.path.basename(FN))
-                except ValueError as e:
-                    print(f"[SKIP] Bad filename: {FN} -> {e}", file=sys.stderr)
-                    continue
-
-                # Apply filters (if any)
-                FN_eligible = True
-                for col, val in filters.items():
-                    if   (col == "seed") and (seed != val):
-                        FN_eligible = False
-                    elif (col == "sim_type") and (sim_type != val):
-                        FN_eligible = False
-                    elif (col == "thermoIx") and (int(thermo_index) != val):
-                        FN_eligible = False
-                if not FN_eligible:
-                    continue
-
-                print(f"Reading {FN} ...", end=" ", flush=True)
-                try:
-                    obs, meta = self.getTrajDataFromFile(
-                        FN, seed, sim_type, thermo_index,
-                        observable_fn,
-                        frames=frames,
-                        **obs_kwargs
-                    )
-                except Exception as e:
-                    print(f"[FAIL] Error reading {FN}: {e}", file=sys.stderr)
-                    continue
-
-                obsList.append(obs)
-                metadata_rows.append(meta)
-                print("done.")
-
-        metadata_df = pd.DataFrame(metadata_rows)
-        return obsList, metadata_df
-    #
-    
-    # Write restart files into self.dir/restDir/restDir.<seed>
-    def write_restarts_from_trajectories(self, restDir, topology, out_ext='rst7', dry=True):
-        """ Read trajectory files of the form <mol>_<seed>.<replica>.dcd from self.dir,
-        extract the last frame, and write restart files into self.dir/restDir/restDir.<seed>.
-        Arguments:
-            restDir : Name of the subdirectory (inside self.dir) to store restart files
-            topology: Path to a topology file (AMBER prmtop or PDB) required to read the DCDs
-            out_ext : Output extension/format. 'rst7' (default) requires ParmEd; if
-                      ParmEd is unavailable, a PDB will be written instead.
-            dry     : If True, do not actually write files, just print what would be done.
-        Output:
-            For each trajectory file <mol>_<seed>.<replica>.dcd, writes:
-                self.dir/restDir/restDir.<seed>/<mol>_<seed>.<replica>.<out_ext>
-        """
-        
-        traj_files = sorted(glob.glob(os.path.join(self.dir, '*.dcd')))
-        if not traj_files:
-            print(f"Warning: No trajectory files found in {self.dir}", file=sys.stderr)
-            return
-
-        for traj in traj_files:
-            base = os.path.basename(traj)  # e.g. protein_1234567.0.dcd
-            root, _ = os.path.splitext(base)  # protein_1234567.0
-
-            # Extract seed from filename assuming <mol>_<seed>.<replica>.dcd
-            try:
-                parts = root.split('_') # protein 1234567.0
-                seed_part = parts[-1].split('.')[0]  # after "_"
-                seed = seed_part
-                replica_part = parts[-1].split('.')[1]  # after "."
-                replica = int(replica_part.replace('repl', ''))
-            except Exception:
-                print(f"Could not parse seed from {base}", file=sys.stderr)
-                continue
-
-            # Create per-seed subdirectory: restDir/restDir.<seed>
-            #seed_dir = os.path.join(self.dir, restDir, f"{seed}")
-            seed_dir = os.path.join(restDir, f"{seed}")
-            print(f"Creating seed directory: {seed_dir} ...", end=' ', flush=True)
-
-            if not dry:
-                os.makedirs(seed_dir, exist_ok=True)
-                print("done.", flush=True)
-            else:
-                print()
-
-            try:
-                # Load trajectory with topology
-                t = md.load_dcd(traj, top=topology)
-                last = t[-1]  # last frame
-
-                # Decide extension
-                ext = out_ext.lower()
-                if ext == 'rst7' and not _HAS_PARMED:
-                    print(f"ParmEd not available; writing PDB instead for {base}", file=sys.stderr)
-                    ext = 'pdb'
-
-                if ext == 'rst7':
-                    # ParmEd path
-                    struct = pmd.load_file(topology)
-                    coords_ang = last.xyz[0] * 10.0
-                    struct.coordinates = coords_ang
-
-                    if (last.unitcell_lengths is not None) and (last.unitcell_angles is not None):
-                        lengths = (last.unitcell_lengths[0] * 10.0).tolist()
-                        angles = last.unitcell_angles[0].tolist()
-                        struct.box = lengths + angles
-
-                    out_path = os.path.join(seed_dir, f"ligand.s{replica}.rst7")
-                    print(f"Writing restart file: {out_path} ... ", end='', flush=True)
-                    
-                    if not dry:
-                        struct.save(out_path, overwrite=True)
-                        print("done.", flush=True)
-                    else:
-                        print()
-
-                elif ext == 'pdb':
-                    out_path = os.path.join(seed_dir, f"ligand.s{replica}.pdb")
-                    print(f"Writing restart file: {out_path} ... ", end='', flush=True)
-
-                    if not dry:
-                        last.save_pdb(out_path)
-                        print("done.", flush=True)
-                    else:
-                        print()
-
-                else:
-                    out_path = os.path.join(seed_dir, f"ligand.s{replica}.pdb")
-                    print(f"Writing restart file: {out_path} ... ", end='', flush=True)
-
-                    if not dry:
-                        last.save_pdb(out_path)
-                        print("done.", flush=True)
-                    else:
-                        print()
-
-                print(f"Wrote restart: {out_path}")
-
-            except Exception as e:
-                print(f"Error processing {traj}: {e}", file=sys.stderr)
-
-#endregion --------------------------------------------------------------------
 
 # -----------------------------------------------------------------------------
 #                                MAIN
@@ -610,6 +293,8 @@ def main(args):
     FNManager = None # classes
     out_df, traj_df = None, None # pandas
 
+    stats = LS_Statistics()
+
     if OUTPUT_REQUIRED:
 
         GLOBAL_BURNIN = 5000
@@ -658,6 +343,7 @@ def main(args):
         # print("\n\nout_df.keys():\n", out_df.keys())
         # print('\n\nout_df.get("pe_o"):\n', out_df.get("pe_o"))
         # print('\n\nout_df.get("pe_o").to_numpy():\n', out_df.get("pe_o").to_numpy())
+        # exit(2)
         #endregion Panda_Study
 
         #region In-house basic checks
@@ -696,25 +382,67 @@ def main(args):
 
             grouped = roboAna.df.groupby(['thermoIx', 'sim_type', 'seed'])
 
+            nofThermodynamicStates = roboAna.df['thermoIx'].nunique()
+
+            direction_color = {0: 'blue', 1: 'red'}
+            thermo_cmap = plt.get_cmap("tab20")
+            #thermo_colors = [thermo_cmap(i) for i in np.linspace(0, 1, nofThermodynamicStates)]
+            thermo_colors = ['blue', 'red']
+
+            plt.figure(figsize=(8, 4))
+            burnin_local = 0
+            stop_at = 1000
+            stride = 2
             for (thermoIx, sim_type, seed), group in grouped:
-                plt.figure(figsize=(8, 4))
                 # compute delta PE
-                for exchangeDirection in [0, 1]:
-                    delta_pe = (group['pe_n'] - group['pe_o'])[exchangeDirection:1000][::2]
+                #for start_at in [0, 1]:
+                #for start_at in [0]: # ala1
+                #for start_at in [1]: # ethane
+                for start_at in [0, 1]: # trpch
+                    delta_pe = (group['pe_n'] - group['pe_o'])[(start_at + burnin_local) : stop_at][::stride]
+                    #delta_ke = (group['ke_n'] - group['ke_prop'])[(start_at + burnin_local) : stop_at][::stride]
+                    #etot_o = (group['pe_o'] + group['ke_prop'])[(start_at + burnin_local) : stop_at][::stride]
+                    #etot_n = (group['pe_n'] + group['ke_n'])[(start_at + burnin_local) : stop_at][::stride]
+                    #delta_etot = etot_n - etot_o
 
-                    plt.plot(delta_pe.values, marker='.', linestyle='-', alpha=0.7)
+                    plt.plot(delta_pe.values, marker='.', linestyle='-', alpha=0.7,
+                             label=f"ΔPE thermoIx {thermoIx}",
+                             color=thermo_colors[thermoIx%2])
 
-                    plt.title(f"ΔE = pe_n - pe_o (thermoIx={thermoIx}, sim_type={sim_type}, seed={seed})")
+                    #plt.title(f"ΔE = pe_n - pe_o (thermoIx={thermoIx}, sim_type={sim_type}, seed={seed})")
+                    plt.title(f"ΔE")
                     plt.xlabel("Index")
                     plt.ylabel("ΔE")
+                    plt.legend()
                     plt.grid(True)
-
                     plt.tight_layout()
-                plt.show()
+            #plt.show()
 
             #dpeHist_df = roboAna.delta_pe_histograms(bins=50)
             ##plot_histogram(dpeHist_df, save_path=f"check_dpe_hist.png")
             #plot_histogram(dpeHist_df)
+
+            plt.figure(figsize=(8, 4))
+            burnin_local = 0
+            stop_at = 1000
+            stride = 2
+            for (thermoIx, sim_type, seed), group in grouped:
+                
+                for start_at in [0, 1]: # trpch
+
+                    JDetLog = group['JDetLog'][(start_at + burnin_local) : stop_at][::stride]
+
+                    plt.plot(JDetLog.values, marker='.', linestyle='-', alpha=0.7,
+                             label=f"JDetLog thermoIx {thermoIx}",
+                             color=thermo_colors[thermoIx%2])  
+                    plt.title(f"JDetLog")
+                    plt.xlabel("Index")
+                    plt.ylabel("JDetLog")
+                    plt.legend()
+                    plt.grid(True)
+                    plt.tight_layout()
+            plt.show()
+
         #endregion
 
         #region Paper figures: pe_o
@@ -856,23 +584,40 @@ def main(args):
 
             observables = []
             observables_meta = []
+            nof_type1 = 0
+            nof_type3 = 0
+
             repl_exxrs = []
             obs_stds = []
             obs_vars = []
             obs_statisticalEnergys = []
             obs_skews = []
+
+            ACF_rhos = []
+            ACF_rhos_mean_type1 = []
+            ACF_rhos_mean_type3 = []
+            tau_ac_type1, tau_ac_type3 = 0, 0
             obs_taus = []
             obs_ESSs = []
+
             PRINT__, PLOT__ = False, False
 
             ix = -1
             # We iterate through each group (replica) one by one
             for (sim_type, seed, replicaIx), subdf_group in out_df.groupby(["sim_type", "seed", "replicaIx"]):
                 ix += 1
+
+                if sim_type == "1":
+                    nof_type1 += 1
+                elif sim_type == "3":
+                    nof_type3 += 1
                 #print(f"Processing sim_type={sim_type}, seed={seed}, replicaIx={replicaIx} (group {ix})")
                 
                 # Extract the data for THIS specific replica
                 obs_data = subdf_group["thermoIx"].to_numpy()
+
+                #print(f"obs_data", obs_data.shape, obs_data)
+
                 observables.append(obs_data)
                 observables_meta.append({
                     "sim_type": sim_type,
@@ -901,11 +646,12 @@ def main(args):
                 # --- Calculate Autocorrelation Time (Integrated) ---
                 #obs_tau = calculate_iat(obs_data)
                 #print("obs_tau", obs_tau)
-                (ACF_rho, obs_tau, ess) = autocorr2_revised(obs_data, lag_fraction=0.5, max_lag=50000)
+                (ACF_rho, obs_tau, ess) = stats.autocorr2_revised(obs_data, lag_fraction=0.5, max_lag=50000)
                 #print("obs_tau", obs_tau)
-                #(ACF_rho, obs_tau, ess) = autocorr3_revised(obs_data, lag_fraction=0.5, max_lag=50000)
+                #(ACF_rho, obs_tau, ess) = stats.autocorr3_revised(obs_data, lag_fraction=0.5, max_lag=50000)
                 #print("obs_tau", obs_tau)
 
+                ACF_rhos.append(ACF_rho)
                 obs_taus.append(obs_tau)
                 
                 obs_statisticalEnergy = obs_std / (obs_tau)
@@ -921,7 +667,7 @@ def main(args):
                     plot1D(
                         Y=[obs_data], 
                         X=None,
-                        ylim=(0, 13),
+                        ylim=(0, 14),
                         title=f"Replica Trajectory: {sim_type} | Seed {seed} | Rep {replicaIx}\n:exx {exchange_rate:.3f}",
                         xlabel="Frame",
                         ylabel="thermoIx (State)",
@@ -945,13 +691,33 @@ def main(args):
             obs_list_trimmed = np.array([Y[:min_len] for Y in observables])
             #print(obs_list_trimmed.shape)
 
-
             cumMean_list = []
             cumSom_list = []
             for ix, obs in enumerate(obs_list_trimmed):
-                cumMean, cumSom = cum_scum(obs)
+                cumMean, cumSom = stats.cum_scum(obs)
                 cumMean_list.append(cumMean)
                 cumSom_list.append(cumSom)
+
+            ACF_min = min(len(acf) for acf in ACF_rhos)
+            ACF_rhos = np.array([acf[:ACF_min] for acf in ACF_rhos])
+
+            ACF_rhos_mean_type1 = np.zeros(ACF_min, dtype=float)
+            ACF_rhos_mean_type3 = np.zeros(ACF_min, dtype=float)
+
+            for ix, acf in enumerate(ACF_rhos):
+                sim_type = observables_meta[ix]['sim_type']
+                if int(sim_type) == 1:
+                    ACF_rhos_mean_type1 += acf
+                elif int(sim_type) == 3:
+                    ACF_rhos_mean_type3 += acf
+
+            if nof_type1 > 0:
+                ACF_rhos_mean_type1 /= nof_type1
+            if nof_type3 > 0:
+                ACF_rhos_mean_type3 /= nof_type3
+
+            tau_ac_type1 = stats.getTau(ACF_rhos_mean_type1)
+            tau_ac_type3 = stats.getTau(ACF_rhos_mean_type3)
 
             PRINT__, PLOT__ = False, False
             if PLOT__:
@@ -980,7 +746,9 @@ def main(args):
                     replicaIx = observables_meta[ix]['replicaIx']
                     print(f"sim_type={sim_type}, seed={seed},replicaIx={replicaIx}," + 
                           f" exxs: {repl_exxrs[ix]:.3f} stds: {obs_stds[ix]:.3f} skew: {obs_skews[ix]:.3f}," + 
-                          f" tau: {obs_taus[ix]:.3f} statEnergy: {obs_statisticalEnergys[ix]:.9f}")
+                          f" tau_k: {obs_taus[ix]:.3f} statEnergy: {obs_statisticalEnergys[ix]:.9f}")
+                    
+                print(f"Mean tau_ac type 1: {tau_ac_type1:.3f}, Mean tau_ac type 3: {tau_ac_type3:.3f}")
 
                 if PLOT__:
                     plot1D(
@@ -996,6 +764,40 @@ def main(args):
                     )            
                     plt.show()
                     plt.close()
+
+            PRINT__, PLOT__ = False, True
+            if PRINT__:
+                print("ACF_rhos", ACF_rhos)
+                print("obs_taus", obs_taus)
+                print("obs_ESSs", obs_ESSs)
+
+            if PLOT__:
+                # plot1D(
+                #     Y=ACF_rhos,
+                #     title="Autocorrelation Functions (ACF) by Replica",
+                #     xlabel="Lag",
+                #     ylabel="ACF",
+                #     labels=[f"Seed {observables_meta[ix]['seed']} Type {observables_meta[ix]['sim_type']} Rep {observables_meta[ix]['replicaIx']}" \
+                #             for ix in range(len(ACF_rhos))],
+                #     colors=[colorByType(observables_meta[ix]['sim_type']) \
+                #             for ix in range(len(ACF_rhos))],
+                #     legend=False
+                # )
+
+                plot1D(
+                    Y=[ACF_rhos_mean_type1, ACF_rhos_mean_type3],
+                    title="Mean Autocorrelation Function (ACF) Across Replicas",
+                    xlabel="Lag",
+                    ylabel="Mean ACF",
+                    labels=["Mean ACF Type 1", "Mean ACF Type 3"],
+                    colors=["black", "red"],
+                    legend=False
+                )
+
+                plt.show()
+
+                plt.close()
+
         #endregion
 
 
@@ -1008,7 +810,7 @@ def main(args):
             num_replicas = len(grouped)
 
             # Calculate exchange rate
-            burnin = 1024
+            burnin_local = 1024
 
             # exch_df = rexEff.calc_exchange_rates(burnin=burnin)
             # print("Exchange rates at burnin", burnin)
@@ -1087,7 +889,7 @@ def main(args):
         #     plt.close()
         #endregion
 
-        # Objective: Ensemble mean of the cummulative mean for each T
+        # Objective: Statistics from any observable from trajectories
         if "traj_stats" in args.figures:
 
             utilObj = REXFNManager()
@@ -1148,7 +950,7 @@ def main(args):
                 "alpha_eq": {"phi_min": np.deg2rad( 35 ), "phi_max": np.deg2rad( 85), "psi_min": np.deg2rad(-180), "psi_max": np.deg2rad(25)}
             }
 
-            def assign_basin_states(traj, a1=4, a2=6, a3=8, a4=14, a5=16):
+            def ala_PMF_indicator(traj, a1=4, a2=6, a3=8, a4=14, a5=16):
                 # 1. Compute dihedrals for all frames
                 phi = md.compute_dihedrals(traj, [[a1, a2, a3, a4]]).ravel()
                 psi = md.compute_dihedrals(traj, [[a2, a3, a4, a5]]).ravel()
@@ -1192,8 +994,10 @@ def main(args):
             #     frames=frames,
             #     a1=8, a2=298,   # optional; overrides defaults
             # )
+            obs_name = ala_PMF_indicator.__name__
+            obs_title = "Alanine Dipeptide PMF Indicator"
             (observables, traj_metadata_df) = FNManager.getTrajDataFromAllFiles(
-                assign_basin_states,
+                ala_PMF_indicator,
                 filters=filters,
                 frames=frames,
                 a1=4, a2=6, a3=8, a4=14, a5=16,  # dihedral_adj_a1_a2_a3_a4_a5
@@ -1201,40 +1005,7 @@ def main(args):
                 #a1=6, a2=8, a3=14, a4=16,  # psi
             )
 
-            def assign_basin_states(traj, a1=4, a2=6, a3=8, a4=14, a5=16):
-                # 1. Compute dihedrals for all frames
-                phi = md.compute_dihedrals(traj, [[a1, a2, a3, a4]]).ravel()
-                psi = md.compute_dihedrals(traj, [[a2, a3, a4, a5]]).ravel()
-                
-                # 2. Define the Boolean Masks for each state
-                # C5, PPII, and C7_eq all map to 0
-                is_c5 = (phi >= np.deg2rad(-180)) & (phi <= np.deg2rad(-95)) & \
-                        (psi >= np.deg2rad(105))  & (psi <= np.deg2rad(180))
-                        
-                is_ppii = (phi >= np.deg2rad(-96)) & (phi <= np.deg2rad(-45)) & \
-                        (psi >= np.deg2rad(105)) & (psi <= np.deg2rad(180))
-                        
-                is_c7eq = (phi >= np.deg2rad(-96)) & (phi <= np.deg2rad(-45)) & \
-                        (psi >= np.deg2rad(-25)) & (psi <= np.deg2rad(104))
-                        
-                # alpha_eq maps to 1
-                is_alpha = (phi >= np.deg2rad(35)) & (phi <= np.deg2rad(85)) & \
-                        (psi >= np.deg2rad(-180)) & (psi <= np.deg2rad(25))
-
-                # 3. Combine "0" states
-                state_zero_mask = is_c5 | is_ppii | is_c7eq
-                
-                # 4. Use np.select to assign values
-                # Logic: If in state_zero_mask -> 0.0
-                #        Else if in is_alpha -> 1.0
-                #        Else (default) -> 0.5
-                conditions = [state_zero_mask, is_alpha]
-                choices = [0.0, 1.0]
-                
-                states = np.select(conditions, choices, default=0.5)
-                
-                return states
-            
+            print("observables shape:", "list of", len(observables), [obs.shape for obs in observables])
             #print("traj_metadata_df:\n", traj_metadata_df)
             #exit(2)
 
@@ -1257,13 +1028,14 @@ def main(args):
             max_glob = max(Y.max() for Y in observables)
             obs_list_trimmed = np.array([Y[:min_len] for Y in observables])
 
-            #print("obs_list_trimmed", obs_list_trimmed.shape, flush=True)
+            print("obs_list_trimmed shape:", obs_list_trimmed.shape, flush=True)
+            print("obs_list_trimmed:", obs_list_trimmed, flush=True)
             #exit(2)
 
             cumMean_list = []
             cumSom_list = []
             for ix, obs in enumerate(obs_list_trimmed):
-                cumMean, cumSom = cum_scum(obs)
+                cumMean, cumSom = stats.cum_scum(obs)
                 cumMean_list.append(cumMean)
                 cumSom_list.append(cumSom)
 
@@ -1281,7 +1053,7 @@ def main(args):
             print("cumRollStd_list", [cumRollStd_list_entry.shape for cumRollStd_list_entry in cumRollStd_list], flush=True)
             #exit(2)
 
-            # Get ensemble means and stds across trajectories
+            # Split observables by type
             type1_obs = []
             type3_obs = []
             for ix, obs in enumerate(obs_list_trimmed):
@@ -1292,49 +1064,66 @@ def main(args):
                     type3_obs.append(obs)
                 else:
                     sys.exit(f"Unknown sim_type {sim_type} encountered.")
-                    
-            # Get ensemble means and stds across trajectories
-            type1_obs_means, type1_obs_stds = [], []
-            type3_obs_means, type3_obs_stds = [], []
+
+            print("type1_obs", [entry.shape for entry in type1_obs], flush=True)
+            print("type3_obs", [entry.shape for entry in type3_obs], flush=True)
+            #exit(2)
+
+            # Ensemble means and stds across trajectories
+            type1_obs_cummeans, type1_obs_cumstds = [], []
+            type3_obs_cummeans, type3_obs_cumstds = [], []
             for ix, cum_mean in enumerate(cumMean_list):
                 sim_type = observables_meta[ix]["sim_type"]
                 if int(sim_type) == 1:
-                    type1_obs_means.append(cum_mean)
-                    type1_obs_stds.append(cumSom_list[ix])
+                    type1_obs_cummeans.append(cum_mean)
+                    type1_obs_cumstds.append(cumSom_list[ix])
                 elif int(sim_type) == 3:
-                    type3_obs_means.append(cum_mean)
-                    type3_obs_stds.append(cumSom_list[ix])
+                    type3_obs_cummeans.append(cum_mean)
+                    type3_obs_cumstds.append(cumSom_list[ix])
                 else:
                     sys.exit(f"Unknown sim_type {sim_type} encountered.")
 
-            type1_ens_means, type1_ensemble_stds = ensemble_mean_and_std(type1_obs_means)
-            type3_ens_means, type3_ensemble_stds = ensemble_mean_and_std(type3_obs_means)
+            print("type1_obs_cummeans", [entry.shape for entry in type1_obs_cummeans], flush=True)
+            print("type3_obs_cummeans", [entry.shape for entry in type3_obs_cummeans], flush=True)
+
+            type1_ens_means, type1_ens_stds = stats.ensemble_mean_and_std(type1_obs)
+            type3_ens_means, type3_ens_stds = stats.ensemble_mean_and_std(type3_obs)
+            type1_ens_cummeans, type1_ens_cumstds = stats.ensemble_mean_and_std(type1_obs_cummeans)
+            type3_ens_cummeans, type3_ens_cumstds = stats.ensemble_mean_and_std(type3_obs_cummeans)
 
             print("type1_ens_means", type1_ens_means.shape, flush=True)
-            print("type1_ensemble_stds", type1_ensemble_stds.shape, flush=True)
+            print("type3_ens_means", type3_ens_means.shape, flush=True)
+            print("type1_ens_cummeans", type1_ens_cummeans.shape, flush=True)
+            print("type3_ens_cummeans", type3_ens_cummeans.shape, flush=True)
+            #exit(2)
 
-            type1_ens_hists = ensemble_histogram_plus(
+            # Ensemble histograms
+            nbins = 50
+            type1_ens_hists = stats.ensemble_histogram_plus(
                 type1_obs,
                 density=True,
-                bins=50,
+                bins=nbins,
                 obs_range=(min_glob, max_glob)
             )
-            type3_ens_hists = ensemble_histogram_plus(
+            type3_ens_hists = stats.ensemble_histogram_plus(
                 type3_obs,
                 density=True,
-                bins=50,
+                bins=nbins,
                 obs_range=(min_glob, max_glob)
             )
-            print("type1_bin_centers", type1_ens_hists["bin_centers"])
-            print("type3_bin_centers", type3_ens_hists["bin_centers"])
             assert np.allclose(type1_ens_hists["bin_centers"], type3_ens_hists["bin_centers"]), "Bin centers do not match between types."
+
+            print("type1_ens_hists", type1_ens_hists.keys())
+            print("type1_ens_bin_centers", type1_ens_hists["bin_centers"].shape)
+            print("type1_ens_hists mean ", type1_ens_hists["mean"].shape)
+            #exit(2)
 
             # Get autocorrelation functions per trajectory
             acf_list = []
             fit_curve_list = []
             tau_opt_list = []
             for ix, obs in enumerate(obs_list_trimmed):
-                acf, fit_curve, tau_opt = normalized_autocorrelation(obs, max_lag=min_len-1, estimate_tau=True)
+                acf, fit_curve, tau_opt = stats.normalized_autocorrelation(obs, max_lag=min_len-1, estimate_tau=True)
                 acf_list.append(acf)
                 fit_curve_list.append(fit_curve)
                 tau_opt_list.append(tau_opt)
@@ -1350,9 +1139,9 @@ def main(args):
                 if args.useAgg:
                     plotFN = f"ee.png"                
                 plot1D(obs_list_trimmed,
-                       title="End-to-end distance",
+                       title=obs_title,
                        xlabel="Frame",
-                       ylabel=dist_atom1_atom2.__name__,
+                       ylabel=obs_name,
                        labels=[f"{observables_meta[ix]['seed']} type {observables_meta[ix]['sim_type']}" \
                                for ix in range(len(obs_list_trimmed))],
                         colors=[colorByType(observables_meta[ix]['sim_type']) \
@@ -1412,17 +1201,16 @@ def main(args):
                         save_path=plotFN
                        )
 
-
             if PRINT__:
-                print("type1_ens_means", type1_ens_means.shape)
-                print("type1_ensemble_stds", type1_ensemble_stds.shape)
+                print("type1_ens_means", type1_ens_cummeans.shape)
+                print("type1_ensemble_stds", type1_ens_cumstds.shape)
             if PLOT__:
                 plotFN = None
                 if args.useAgg:
                     plotFN = f"eecm_ens.png"
-                plot1D([type1_ens_means, type3_ens_means],
+                plot1D([type1_ens_cummeans, type3_ens_cummeans],
                        #X=[type1_ens_means, type3_ens_means],
-                       Yerr=[type1_ensemble_stds, type3_ensemble_stds], Yerr_every=10,
+                       Yerr=[type1_ens_cumstds, type3_ens_cumstds], Yerr_every=10,
                        title="Ensemble mean of cumulative mean of end-to-end distance",
                        xlabel="Frame",
                        ylabel=dist_atom1_atom2.__name__ + " ensemble cumulative mean",
@@ -1433,7 +1221,7 @@ def main(args):
                 plotFN = None
                 if args.useAgg:
                     plotFN = f"eecs_ens.png"
-                plot1D([type1_ensemble_stds, type3_ensemble_stds],
+                plot1D([type1_ens_cumstds, type3_ens_cumstds],
                        #X=[type1_ens_means, type3_ens_means],
                        #Yerr=[type1_ensemble_stds, type3_ensemble_stds],
                        title="Ensemble mean of cumulative std of the mean of EE distance",
@@ -1463,8 +1251,6 @@ def main(args):
                        colors=[colorByType(1), colorByType(3)],
                        save_path=plotFN
                        )
-
-            PRINT__, PLOT__ = True, True
 
             if PRINT__:
                 #print("fit_curve_list", fit_curve_list)
@@ -1497,58 +1283,9 @@ def main(args):
                         save_path=plotFN
                           )
 
-            if not args.useAgg:    
+            if not args.useAgg:
                 plt.show()
-            plt.close()       
-
-            PRINT__, PLOT__ = False, False
-
-        #region Paper figures: trajectory autocorrelation
-        if "traj_eeac" in args.figures:
-            
-            rex_eff = REXEfficiency(
-                out_df=None,
-                trajectories=observables,
-                traj_metadata_df=traj_metadata_df
-            )
-
-            print(rex_eff.trajectories)
-            print(rex_eff.traj_metadata_df)
-
-            # Compute per-trajectory autocorrelation functions
-            acf_list, tau_list, meta_list = rex_eff.compute_end_to_end_autocorr(
-                burnin=GLOBAL_BURNIN,
-                max_lag=3000,          # or specify an int
-                dt=1.0,                # frame time (adjust if needed)
-                average_over_trajs=False
-            )
-
-            # Plot
-            plt.figure(figsize=(10, 6))
-            plt.xlabel("Lag (frames)")
-            plt.ylabel("Autocorrelation")
-            plt.title("End-to-End Distance ACF Over Trajectories")
-
-            utilObj = REXFNManager()
-
-            for ix, acf in enumerate(acf_list):
-                FN = (meta_list[ix])["filepath"]
-                seed, sim_type = utilObj.get_Info_FromFN(os.path.basename(FN))
-                Color = "black"
-                if int(seed) > 3019999:
-                #if False:
-                    Color = "red"
-                plt.plot(acf, color=Color, label=f"Traj {FN} (τ={tau_list[ix]:.2f})")
-
-            plt.legend()
-            plt.grid(True)
-            plt.tight_layout()
-
-            plt.show()
-            plt.savefig("traj_acf_plot.png")
-            plt.close()            
-
-        #endregion
+            plt.close()
 
     #region Restart: write restart files into self.dir/restDir/restDir.<seed>
     if (args.restDir):
