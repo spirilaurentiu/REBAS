@@ -719,6 +719,9 @@ def main(args):
             tau_ac_type1 = stats.getTau(ACF_rhos_mean_type1)
             tau_ac_type3 = stats.getTau(ACF_rhos_mean_type3)
 
+            tau_ac_Hai_type1 = stats.getTau_ac(ACF_rhos_mean_type1)
+            tau_ac_Hai_type3 = stats.getTau_ac(ACF_rhos_mean_type3)
+
             PRINT__, PLOT__ = False, False
             if PLOT__:
                 plot1D(
@@ -749,6 +752,7 @@ def main(args):
                           f" tau_k: {obs_taus[ix]:.3f} statEnergy: {obs_statisticalEnergys[ix]:.9f}")
                     
                 print(f"Mean tau_ac type 1: {tau_ac_type1:.3f}, Mean tau_ac type 3: {tau_ac_type3:.3f}")
+                print(f"Mean tau_ac_Hai type 1: {tau_ac_Hai_type1:.3f}, Mean tau_ac_Hai type 3: {tau_ac_Hai_type3:.3f}")
 
                 if PLOT__:
                     plot1D(
@@ -786,7 +790,7 @@ def main(args):
 
                 plot1D(
                     Y=[ACF_rhos_mean_type1, ACF_rhos_mean_type3],
-                    title="Mean Autocorrelation Function (ACF) Across Replicas",
+                    title="Mean Autocorrelation Function (ACF) Across Replicas (Nguyen & Minh, 2016 - eq 19)",
                     xlabel="Lag",
                     ylabel="Mean ACF",
                     labels=["Mean ACF Type 1", "Mean ACF Type 3"],
@@ -795,7 +799,6 @@ def main(args):
                 )
 
                 plt.show()
-
                 plt.close()
 
         #endregion

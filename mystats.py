@@ -227,21 +227,43 @@ class LS_Statistics:
         # 1 + 2 * sum(rho)
         # Using a running sum to find the self-consistent window
         tau_est = 1.0
-        for aIx in range(1, len(ACF_rho)):
-            tau_est += 2 * ACF_rho[aIx]
+        for lIx in range(1, len(ACF_rho)):
+            tau_est += 2 * ACF_rho[lIx]
 
-            #print(ACF_rho[aIx], tau_est, window_factor, window_factor * tau_est) # Debug: print the ACF values used in the sum
+            #print(ACF_rho[lIx], tau_est, window_factor, window_factor * tau_est) # Debug: print the ACF values used in the sum
 
-            if ACF_rho[aIx] <= 0.1:
+            if ACF_rho[lIx] <= 0.1:
                 break
 
-            if ACF_rho[aIx] < 0.2:
-                if aIx > (window_factor * tau_est):
+            if ACF_rho[lIx] < 0.2:
+                if lIx > (window_factor * tau_est):
                     break
 
             # Warning if we hit the end of the array without 'breaking'
-            if aIx == len(ACF_rho) - 1:
+            if lIx == len(ACF_rho) - 1:
                 print("Warning: Tau estimation did not converge within the provided lags.")
+
+        return tau_est
+    #
+
+    # Calculates Integrated Autocorrelation Time (Hai's paper method eq 19)
+    def getTau_ac(self, ACF_rho):
+        """ Calculates Integrated Autocorrelation Time (Hai's paper method eq 19).
+            Arguments:
+                ACF_rho : array-like
+            Returns:
+                float : estimated integrated autocorrelation time
+        """
+        tau_est = 0.0
+
+        for lIx in range(1, len(ACF_rho)):
+            
+            if ACF_rho[lIx] <= 0.1:
+                break
+
+            lenRatio = float(lIx) / float(len(ACF_rho))
+
+            tau_est += ACF_rho[lIx] - (lenRatio * ACF_rho[lIx])
 
         return tau_est
     #
