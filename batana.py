@@ -73,24 +73,26 @@ class BATStats:
     # Circular correlation between two dihedral series
     def dihedralsCorrelation(self, dihs1, dihs2):
         """ Circular correlation between two dihedral series
-        :param dihs1: list of dihedrals
-        :param dihs1: list of dihedrals
-        :return: circular correlation
+        :param dihs1: first list of dihedrals (radians)
+        :param dihs2: second list of dihedrals (radians)
+        :return: circular correlation coefficient (-1 to 1)
         """
-        x, y = dihs1, dihs2
-        x_bar = self.dihedralMean(dihs1)
-        y_bar = self.dihedralMean(dihs2)
+        x, y = np.array(dihs1), np.array(dihs2)
         
+        # Ensure these methods return the circular mean
+        x_bar = self.dihedralMean(x)
+        y_bar = self.dihedralMean(y)
+        
+        # Calculate sines of the deviations
         x_diff = np.sin(x - x_bar)
         y_diff = np.sin(y - y_bar)
 
-        x_diff_sq = x_diff * x_diff
-        y_diff_sq = y_diff * y_diff 
-
         numerator = np.sum(x_diff * y_diff)
-
-        denominator = np.sqrt(np.sum(x_diff_sq) * np.sum(y_diff_sq))
+        denominator = np.sqrt(np.sum(x_diff**2) * np.sum(y_diff**2))
         
+        if denominator == 0:
+            return 0.0
+            
         return numerator / denominator
     
     #  Compute all-vs-all dihedral correlations
