@@ -40,6 +40,7 @@ class REXFNManager:
         self.topology = topology
         self.OUTPUT_DATA = False
         self.TRAJECTORY_DATA = False
+        #self.rexTrajData = None
 
     # Get seed and simulation type from filename. Determine if OUT or DCD
     def get_Info_FromFN(self, FN):
@@ -132,8 +133,9 @@ class REXFNManager:
         return pd.concat(all_data, ignore_index=True) if all_data else pd.DataFrame()
     #
 
+
     # Get trajectory data from a single file
-    def getTrajDataFromFile(self, FN, seed, sim_type, thermo_index, observable_fn, *, frames=None, **obs_kwargs):
+    def getTrajDataFromFile(self, FN, seed, sim_type, thermo_index, observable_func, *, frames=None, **obs_kwargs):
         """ Get trajectory data from a single file
         :param FN: Filename
         :param seed: seed
@@ -152,15 +154,15 @@ class REXFNManager:
         
         thermodynamicIndex = re.search(r"repl(\d+)", FN).group(1) if "repl" in FN else None
 
-        trajData = REXTrajData(FN, topology=self.topology)
+        rexTrajData = REXTrajData(FN, topology=self.topology)
 
-        obs, meta = trajData.get_traj_observable(
-            observable_fn,
+        obs, meta = rexTrajData.get_traj_observable(
+            observable_func,
             frames=frames,
             **obs_kwargs
         )
 
-        trajData.clear()
+        rexTrajData.clear()
 
         # Enrich meta with filename-derived info
         meta["seed"] = seed
@@ -171,7 +173,7 @@ class REXFNManager:
     #
 
     # Get trajectory data from all files. Deals with file globbing.
-    def getTrajDataFromAllFiles(self, observable_fn, *, filters={}, frames=None, **obs_kwargs):
+    def getTrajDataFromAllFiles(self, observable_func, *, filters={}, frames=None, **obs_kwargs):
         """ Get trajectory data from all files
         :param observable_fn: Observable function or key
         :param frames: Frames to include
@@ -220,7 +222,7 @@ class REXFNManager:
                 try:
                     obs, meta = self.getTrajDataFromFile(
                         FN, seed, sim_type, thermo_index,
-                        observable_fn,
+                        observable_func,
                         frames=frames,
                         **obs_kwargs
                     )

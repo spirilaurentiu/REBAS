@@ -6,6 +6,7 @@ import sys
 import glob
 from turtle import title
 import pandas as pd
+from batana import BATStats
 import numpy as np
 
 import scipy.stats
@@ -400,10 +401,6 @@ def main(args):
                 #for start_at in [1]: # ethane
                 for start_at in [0, 1]: # trpch
                     delta_pe = (group['pe_n'] - group['pe_o'])[(start_at + burnin_local) : stop_at][::stride]
-                    #delta_ke = (group['ke_n'] - group['ke_prop'])[(start_at + burnin_local) : stop_at][::stride]
-                    #etot_o = (group['pe_o'] + group['ke_prop'])[(start_at + burnin_local) : stop_at][::stride]
-                    #etot_n = (group['pe_n'] + group['ke_n'])[(start_at + burnin_local) : stop_at][::stride]
-                    #delta_etot = etot_n - etot_o
 
                     plt.plot(delta_pe.values, marker='.', linestyle='-', alpha=0.7,
                              label=f"ΔPE thermoIx {thermoIx}",
@@ -897,7 +894,7 @@ def main(args):
 
             utilObj = REXFNManager()
 
-            GLOBAL_BURNIN = 2000
+            GLOBAL_BURNIN = 10000
             GLOBAL_END = None
 
             # pick your frame slice once:
@@ -938,6 +935,40 @@ def main(args):
     
                 return inner_q
 
+            def dihedral_phi_psi(traj, phi_psi="psi", resid=0):
+                """  Calculate phi or psi for a given residue index. """
+                mdtraj_result = None
+                if phi_psi == "phi":
+                    mdtraj_result = md.compute_phi(traj, periodic=False)
+                elif phi_psi == "psi":
+                    mdtraj_result = md.compute_psi(traj, periodic=False)
+                else:
+                    raise ValueError(f"Invalid phi_psi value: {phi_psi}. Must be 'phi' or 'psi'.")
+                
+                atom_indices = mdtraj_result[0] # shape (n_residues, 4)
+                #print("atom_indices", atom_indices[resid, :])
+
+                torsions_all = mdtraj_result[1] # shape (n_frames, n_residues)
+                
+                # Validate residue index
+                if resid >= torsions_all.shape[1] or resid < 0:
+                    raise ValueError(f"Invalid resid {resid}. Must be between 0 and {torsions_all.shape[1]-1}")
+                
+                torsions = torsions_all[:, resid].ravel()
+                #torsions = np.where(torsions < -2.0, (torsions + 2.0) + (torsions * np.pi), torsions)
+                #print(f"First 10 {phi_psi} values for residue {resid}: {torsions[:10]} radians")
+
+                from batana import BATStats
+                batStats = BATStats()
+                torsions_mean = batStats.dihedralMean(torsions)
+                torsions_var = batStats.dihedralVar(torsions) # technically a dimensionless ratio between 0 and 1. It isn't squared radians.
+                torsions_std = batStats.dihedralStd(torsions)
+                print(f"\nMean {phi_psi} for residue {resid}: {torsions_mean:.3f} radians ({np.rad2deg(torsions_mean):.1f} degrees)")
+                #print(f"Var {phi_psi} for residue {resid}: {torsions_var:.3f} radians ({np.rad2deg(torsions_var):.1f} degrees)")
+                print(f"Std {phi_psi} for residue {resid}: {torsions_std:.3f} radians ({np.rad2deg(torsions_std):.1f} degrees)")
+
+                return torsions
+            #
 
             # ALA1_BASINS = {
             #     "C5":       {"phi_min": -3.141592654, "phi_max": -1.658062789, "psi_min":  1.8325957145, "psi_max": 3.1415926545},
@@ -987,28 +1018,61 @@ def main(args):
                 
                 return states
 
+
+            TRPCH_BASINS = {
+                "basin1": {"psi_min": -1.5, "psi_max": 0.5, "ee_dist_min": 0.0, "ee_dist_max": 1.27},
+                "basin2": {"psi_min": -1.5, "psi_max": 0.5, "ee_dist_min": 1.27, "ee_dist_max": 5.0},
+                "basin3": {"psi_min":  2.0, "psi_max": 3.0, "ee_dist_min": 0.0, "ee_dist_max": 1.27},
+                "basin4": {"psi_min":  2.0, "psi_max": 3.0, "ee_dist_min": 1.27, "ee_dist_max": 5.0},
+            }
+
+            def trpch_PMF_indicator(traj, phi_psi="psi", resid=0):
+                psi = dihedral_phi_psi(traj, phi_psi=phi_psi, resid=resid)
+                ee_dist = dist_atom1_atom2(traj, a1=8, a2=298)
+
+                psi_range1 = (psi >= -1.5) & (psi <= 0.5)
+                psi_range2 = (psi >= 2.0) & (psi <= 3.0)
+                dist_short = (ee_dist <= 1.27)
+                dist_long  = (ee_dist > 1.27) & (ee_dist <= 5.0)
+
+                is_basin1 = psi_range1 & dist_short
+                is_basin2 = psi_range1 & dist_long
+                is_basin3 = psi_range2 & dist_short
+                is_basin4 = psi_range2 & dist_long
+
+                conditions = [is_basin1, is_basin2, is_basin3, is_basin4]
+                choices = [0.0, 0.25, 0.5, 0.75]
+                states = np.select(conditions, choices, default=1.0)
+                return states
+            #
+
+
             # Get trajectory data: (list of arrays of some observable, and 
             # metadata containing filepath, n_frames, n_atoms, frames, seed, sim_type)
             FNManager = REXFNManager(args.dir, args.inFNRoots, args.cols, topology=args.topology)
-            
-            # (observables, traj_metadata_df) = FNManager.getTrajDataFromAllFiles(
-            #     dist_atom1_atom2,
-            #     filters=filters,
-            #     frames=frames,
-            #     a1=8, a2=298,   # optional; overrides defaults
-            # )
-            obs_name = ala_PMF_indicator.__name__
-            obs_title = "Alanine Dipeptide PMF Indicator"
+            obs_name = trpch_PMF_indicator.__name__
+            obs_title = "Dihedral Angle"
             (observables, traj_metadata_df) = FNManager.getTrajDataFromAllFiles(
-                ala_PMF_indicator,
+                trpch_PMF_indicator,
                 filters=filters,
                 frames=frames,
-                a1=4, a2=6, a3=8, a4=14, a5=16,  # dihedral_adj_a1_a2_a3_a4_a5
-                #a1=4, a2=6, a3=8, a4=14,  # phi
-                #a1=6, a2=8, a3=14, a4=16,  # psi
-            )
+                #a1=8, a2=298,   # optional; overrides defaults
+                phi_psi="psi",  # optional; only for dihedral_phi_psi
+                resid=11,        # optional; only for dihedral_phi_psi
 
-            print("observables shape:", "list of", len(observables), [obs.shape for obs in observables])
+            )
+            # obs_name = ala_PMF_indicator.__name__
+            # obs_title = "Alanine Dipeptide PMF Indicator"
+            # (observables, traj_metadata_df) = FNManager.getTrajDataFromAllFiles(
+            #     ala_PMF_indicator,
+            #     filters=filters,
+            #     frames=frames,
+            #     a1=4, a2=6, a3=8, a4=14, a5=16,  # dihedral_adj_a1_a2_a3_a4_a5
+            #     #a1=4, a2=6, a3=8, a4=14,  # phi
+            #     #a1=6, a2=8, a3=14, a4=16,  # psi
+            # )
+
+            #print("observables shape:", "list of", len(observables), [obs.shape for obs in observables])
             #print("traj_metadata_df:\n", traj_metadata_df)
             #exit(2)
 
@@ -1031,8 +1095,8 @@ def main(args):
             max_glob = max(Y.max() for Y in observables)
             obs_list_trimmed = np.array([Y[:min_len] for Y in observables])
 
-            print("obs_list_trimmed shape:", obs_list_trimmed.shape, flush=True)
-            print("obs_list_trimmed:", obs_list_trimmed, flush=True)
+            #print("obs_list_trimmed shape:", obs_list_trimmed.shape, flush=True)
+            #print("obs_list_trimmed:", obs_list_trimmed, flush=True)
             #exit(2)
 
             cumMean_list = []
@@ -1042,7 +1106,7 @@ def main(args):
                 cumMean_list.append(cumMean)
                 cumSom_list.append(cumSom)
 
-            print("cumMean_list", [cumMean_list_entry.shape for cumMean_list_entry in cumMean_list], flush=True)
+            #print("cumMean_list", [cumMean_list_entry.shape for cumMean_list_entry in cumMean_list], flush=True)
             #exit(2)
 
             cumRollStd_list = []
@@ -1053,7 +1117,7 @@ def main(args):
                 
                 cumRollStd_list.append(cumRollStd)
 
-            print("cumRollStd_list", [cumRollStd_list_entry.shape for cumRollStd_list_entry in cumRollStd_list], flush=True)
+            #print("cumRollStd_list", [cumRollStd_list_entry.shape for cumRollStd_list_entry in cumRollStd_list], flush=True)
             #exit(2)
 
             # Split observables by type
@@ -1068,8 +1132,8 @@ def main(args):
                 else:
                     sys.exit(f"Unknown sim_type {sim_type} encountered.")
 
-            print("type1_obs", [entry.shape for entry in type1_obs], flush=True)
-            print("type3_obs", [entry.shape for entry in type3_obs], flush=True)
+            #print("type1_obs", [entry.shape for entry in type1_obs], flush=True)
+            #print("type3_obs", [entry.shape for entry in type3_obs], flush=True)
             #exit(2)
 
             # Ensemble means and stds across trajectories
@@ -1086,18 +1150,18 @@ def main(args):
                 else:
                     sys.exit(f"Unknown sim_type {sim_type} encountered.")
 
-            print("type1_obs_cummeans", [entry.shape for entry in type1_obs_cummeans], flush=True)
-            print("type3_obs_cummeans", [entry.shape for entry in type3_obs_cummeans], flush=True)
+            #print("type1_obs_cummeans", [entry.shape for entry in type1_obs_cummeans], flush=True)
+            #print("type3_obs_cummeans", [entry.shape for entry in type3_obs_cummeans], flush=True)
 
             type1_ens_means, type1_ens_stds = stats.ensemble_mean_and_std(type1_obs)
             type3_ens_means, type3_ens_stds = stats.ensemble_mean_and_std(type3_obs)
             type1_ens_cummeans, type1_ens_cumstds = stats.ensemble_mean_and_std(type1_obs_cummeans)
             type3_ens_cummeans, type3_ens_cumstds = stats.ensemble_mean_and_std(type3_obs_cummeans)
 
-            print("type1_ens_means", type1_ens_means.shape, flush=True)
-            print("type3_ens_means", type3_ens_means.shape, flush=True)
-            print("type1_ens_cummeans", type1_ens_cummeans.shape, flush=True)
-            print("type3_ens_cummeans", type3_ens_cummeans.shape, flush=True)
+            #print("type1_ens_means", type1_ens_means.shape, flush=True)
+            #print("type3_ens_means", type3_ens_means.shape, flush=True)
+            #print("type1_ens_cummeans", type1_ens_cummeans.shape, flush=True)
+            #print("type3_ens_cummeans", type3_ens_cummeans.shape, flush=True)
             #exit(2)
 
             # Ensemble histograms
@@ -1116,9 +1180,9 @@ def main(args):
             )
             assert np.allclose(type1_ens_hists["bin_centers"], type3_ens_hists["bin_centers"]), "Bin centers do not match between types."
 
-            print("type1_ens_hists", type1_ens_hists.keys())
-            print("type1_ens_bin_centers", type1_ens_hists["bin_centers"].shape)
-            print("type1_ens_hists mean ", type1_ens_hists["mean"].shape)
+            #print("type1_ens_hists", type1_ens_hists.keys())
+            #print("type1_ens_bin_centers", type1_ens_hists["bin_centers"].shape)
+            #print("type1_ens_hists mean ", type1_ens_hists["mean"].shape)
             #exit(2)
 
             # Get autocorrelation functions per trajectory
@@ -1134,7 +1198,7 @@ def main(args):
             PRINT__, PLOT__ = True, True
 
             if PRINT__:
-                print("observables_meta", observables_meta)
+                #print("observables_meta", observables_meta)
                 #print("observables", observables)
                 print("Careful: trimmed to min length:", min_len, ". Max length:", max_len)
             if PLOT__:
@@ -1151,6 +1215,8 @@ def main(args):
                                for ix in range(len(obs_list_trimmed))],
                         save_path=plotFN
                        )
+
+            #PRINT__, PLOT__ = False, False
 
             if PRINT__:
                 pass
