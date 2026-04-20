@@ -13,7 +13,7 @@ import scipy.stats
 from scipy.signal import find_peaks
 
 import matplotlib
-#matplotlib.use('Agg')
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 from mystats import LS_Statistics
@@ -970,13 +970,6 @@ def main(args):
                 return torsions
             #
 
-            # ALA1_BASINS = {
-            #     "C5":       {"phi_min": -3.141592654, "phi_max": -1.658062789, "psi_min":  1.8325957145, "psi_max": 3.1415926545},
-            #     "PPII":     {"phi_min": -1.675516081, "phi_max": -0.785398163, "psi_min":  1.8325957145, "psi_max": 3.14159265358979},
-            #     "C7_eq":    {"phi_min": -1.675516081, "phi_max": -0.785398163, "psi_min": -0.436332312998582, "psi_max": 1.8151424220741},
-            #     "alpha_eq": {"phi_min":  0.610865238198015, "phi_max": 1.48352986419518, "psi_min": -3.141592654, "psi_max": 0.436332313}
-            # }
-
             ALA1_BASINS = {
                 "C5":       {"phi_min": np.deg2rad(-180), "phi_max": np.deg2rad(-95), "psi_min": np.deg2rad(105 ), "psi_max": np.deg2rad(180)},
                 "PPII":     {"phi_min": np.deg2rad(-96 ), "phi_max": np.deg2rad(-45), "psi_min": np.deg2rad(105 ), "psi_max": np.deg2rad(180)},
@@ -1018,7 +1011,6 @@ def main(args):
                 
                 return states
 
-
             TRPCH_BASINS = {
                 "basin1": {"psi_min": -1.5, "psi_max": 0.5, "ee_dist_min": 0.0, "ee_dist_max": 1.27},
                 "basin2": {"psi_min": -1.5, "psi_max": 0.5, "ee_dist_min": 1.27, "ee_dist_max": 5.0},
@@ -1050,15 +1042,16 @@ def main(args):
             # Get trajectory data: (list of arrays of some observable, and 
             # metadata containing filepath, n_frames, n_atoms, frames, seed, sim_type)
             FNManager = REXFNManager(args.dir, args.inFNRoots, args.cols, topology=args.topology)
-            obs_name = trpch_PMF_indicator.__name__
-            obs_title = "Dihedral Angle"
+            obs_name = dist_atom1_atom2.__name__
+            obs_title = "End-to-End Distance"
+            #obs_title = "Trp-Cage PMF Indicator"
             (observables, traj_metadata_df) = FNManager.getTrajDataFromAllFiles(
-                trpch_PMF_indicator,
+                dist_atom1_atom2,
                 filters=filters,
                 frames=frames,
-                #a1=8, a2=298,   # optional; overrides defaults
-                phi_psi="psi",  # optional; only for dihedral_phi_psi
-                resid=11,        # optional; only for dihedral_phi_psi
+                a1=8, a2=298,   # optional; only for dist_atom1_atom2
+                #phi_psi="psi",  # optional; only for dihedral_phi_psi
+                #resid=11,        # optional; only for dihedral_phi_psi
 
             )
             # obs_name = ala_PMF_indicator.__name__
@@ -1204,7 +1197,7 @@ def main(args):
             if PLOT__:
                 plotFN = None
                 if args.useAgg:
-                    plotFN = f"ee.png"                
+                    plotFN = f"traj_obs.png"
                 plot1D(obs_list_trimmed,
                        title=obs_title,
                        xlabel="Frame",
@@ -1216,7 +1209,7 @@ def main(args):
                         save_path=plotFN
                        )
 
-            #PRINT__, PLOT__ = False, False
+            PRINT__, PLOT__ = True, True
 
             if PRINT__:
                 pass
@@ -1224,11 +1217,11 @@ def main(args):
             if PLOT__:
                 plotFN = None
                 if args.useAgg:
-                    plotFN = f"eecm.png"                 
+                    plotFN = f"traj_cummean.png"                 
                 plot1D(cumMean_list,
-                       title="Cumulative mean of end-to-end distance",
+                       title="Cumulative Mean of" + obs_title,
                        xlabel="Frame",
-                       ylabel=dist_atom1_atom2.__name__ + " cumulative mean",
+                       ylabel=obs_name + " cumulative mean",
                        labels=[f"{observables_meta[ix]['seed']} type {observables_meta[ix]['sim_type']}" \
                                for ix in range(len(cumMean_list))],
                         colors=[colorByType(observables_meta[ix]['sim_type']) \
@@ -1241,11 +1234,11 @@ def main(args):
             if PLOT__:
                 plotFN = None
                 if args.useAgg:
-                    plotFN = f"eecs.png"
+                    plotFN = f"traj_cumstd.png"
                 plot1D(cumSom_list,
-                       title="Cumulative standard deviation of the mean of end-to-end distance",
+                       title="Cumulative standard deviation of the mean of" + obs_title,
                        xlabel="Frame",
-                       ylabel=dist_atom1_atom2.__name__ + " cumulative som",
+                       ylabel=obs_name + " cumulative som",
                        labels=[f"{observables_meta[ix]['seed']} type {observables_meta[ix]['sim_type']}" \
                                for ix in range(len(cumSom_list))],
                         colors=[colorByType(observables_meta[ix]['sim_type']) \
@@ -1258,11 +1251,11 @@ def main(args):
             if PLOT__:
                 plotFN = None
                 if args.useAgg:
-                    plotFN = f"eerollstd.png"
+                    plotFN = f"traj_cumrollstd.png"
                 plot1D(cumRollStd_list,
-                       title="Rolling std (window=100 frames) of the cumulative mean of end-to-end distance",
+                       title="Rolling std (window=100 frames) of the cumulative mean of" + obs_title,
                        xlabel="Frame",
-                       ylabel=dist_atom1_atom2.__name__ + " cumulative mean rolling std",
+                       ylabel=obs_name + " cumulative mean rolling std",
                        labels=[f"{observables_meta[ix]['seed']} type {observables_meta[ix]['sim_type']}" \
                                for ix in range(len(cumRollStd_list))],
                         colors=[colorByType(observables_meta[ix]['sim_type']) \
@@ -1276,26 +1269,26 @@ def main(args):
             if PLOT__:
                 plotFN = None
                 if args.useAgg:
-                    plotFN = f"eecm_ens.png"
+                    plotFN = f"traj_ens_cummean.png"
                 plot1D([type1_ens_cummeans, type3_ens_cummeans],
                        #X=[type1_ens_means, type3_ens_means],
                        Yerr=[type1_ens_cumstds, type3_ens_cumstds], Yerr_every=10,
-                       title="Ensemble mean of cumulative mean of end-to-end distance",
+                       title="Ensemble mean of cumulative mean of" + obs_title,
                        xlabel="Frame",
-                       ylabel=dist_atom1_atom2.__name__ + " ensemble cumulative mean",
+                       ylabel=obs_name + " ensemble cumulative mean",
                        labels=["type 1", "type 3"],
                        colors=[colorByType(1), colorByType(3)],
                        save_path=plotFN
                        )
                 plotFN = None
                 if args.useAgg:
-                    plotFN = f"eecs_ens.png"
+                    plotFN = f"traj_ens_cumstd.png"
                 plot1D([type1_ens_cumstds, type3_ens_cumstds],
                        #X=[type1_ens_means, type3_ens_means],
                        #Yerr=[type1_ensemble_stds, type3_ensemble_stds],
-                       title="Ensemble mean of cumulative std of the mean of EE distance",
+                       title="Ensemble mean of cumulative std of the mean of" + obs_title,
                        xlabel="Frame",
-                       ylabel=dist_atom1_atom2.__name__ + " ensemble cumulative som",
+                       ylabel=obs_name + " ensemble cumulative som",
                        labels=["type 1", "type 3"],
                        colors=[colorByType(1), colorByType(3)],
                        save_path=plotFN
@@ -1309,12 +1302,12 @@ def main(args):
             if PLOT__:
                 plotFN = None
                 if args.useAgg:
-                    plotFN = f"ee_dist_distrib.png"
+                    plotFN = f"traj_obs_distrib.png"
                 plot1D([type1_ens_hists["mean"], type3_ens_hists["mean"]],
                        X=[type1_ens_hists["bin_centers"], type3_ens_hists["bin_centers"]],
                        Yerr=[type1_ens_hists["std"], type3_ens_hists["std"]],
-                       title="End-to-end distance distribution",
-                       xlabel=dist_atom1_atom2.__name__,
+                       title="Histogram of" + obs_title,
+                       xlabel=obs_name,
                        ylabel="Probability density",
                        labels=["type 1", "type 3"],
                        colors=[colorByType(1), colorByType(3)],
@@ -1327,9 +1320,9 @@ def main(args):
             if PLOT__:
                 plotFN = None
                 if args.useAgg:
-                    plotFN = f"ee_acf.png"
+                    plotFN = f"traj_acf.png"
                 plot1D(acf_list,
-                       title="Autocorrelation of end-to-end distance",
+                       title="Autocorrelation of" + obs_title,
                        xlabel="Lag (frames)",
                        ylabel="Autocorrelation",
                        labels=[f"{observables_meta[ix]['seed']} type {observables_meta[ix]['sim_type']}" \
@@ -1340,9 +1333,9 @@ def main(args):
                        )
                 plotFN = None
                 if args.useAgg:
-                    plotFN = f"ee_acf_fit.png"
+                    plotFN = f"traj_acf_fit.png"
                 plot1D(fit_curve_list,
-                       title="Fitted exponential decay to ACF of end-to-end distance",
+                       title="Fitted exponential decay to ACF of " + obs_title,
                        xlabel="Lag (frames)",
                        ylabel="Fitted ACF",
                        labels=[f"{observables_meta[ix]['seed']} type {observables_meta[ix]['sim_type']} (τ={tau_opt_list[ix]:.2f})" \

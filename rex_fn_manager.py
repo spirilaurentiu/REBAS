@@ -133,7 +133,6 @@ class REXFNManager:
         return pd.concat(all_data, ignore_index=True) if all_data else pd.DataFrame()
     #
 
-
     # Get trajectory data from a single file
     def getTrajDataFromFile(self, FN, seed, sim_type, thermo_index, observable_func, *, frames=None, **obs_kwargs):
         """ Get trajectory data from a single file
