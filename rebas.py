@@ -460,11 +460,11 @@ def main(args):
                     "seed": seed,})
 
             # Get a trimmed version cut at min length
-            min_len = min(len(Y) for Y in observables)
-            max_len = max(len(Y) for Y in observables)
+            min_num_frames = min(len(Y) for Y in observables)
+            max_num_frames = max(len(Y) for Y in observables)
             min_glob = min(Y.min() for Y in observables)
             max_glob = max(Y.max() for Y in observables)
-            obs_list_trimmed = np.array([Y[:min_len] for Y in observables])
+            obs_list_trimmed = np.array([Y[:min_num_frames] for Y in observables])
 
             cumMean_list = []
             cumSom_list = []
@@ -505,7 +505,7 @@ def main(args):
             # Get autocorrelation functions
             acf_list = []
             for ix, obs in enumerate(obs_list_trimmed):
-                acf = normalized_autocorrelation(obs, max_lag=min_len - 1)
+                acf = normalized_autocorrelation(obs, max_lag=min_num_frames - 1)
                 acf_list.append(acf)
 
             PRINT__, PLOT__ = True, True
@@ -513,7 +513,7 @@ def main(args):
             if PRINT__:
                 print("observables_meta", observables_meta)
                 print("observables", observables)
-                print("Careful: trimmed to min length:", min_len, ". Max length:", max_len)
+                print("Careful: trimmed to min length:", min_num_frames, ". Max length:", max_num_frames)
             if PLOT__:
                 plot1D(
                     Y=obs_list_trimmed,
@@ -681,11 +681,11 @@ def main(args):
                 #plt.savefig("thermoIx_by_replica.png")
 
             # Get a trimmed version cut at min length
-            min_len = min(len(Y) for Y in observables)
-            max_len = max(len(Y) for Y in observables)
+            min_num_frames = min(len(Y) for Y in observables)
+            max_num_frames = max(len(Y) for Y in observables)
             min_glob = min(Y.min() for Y in observables)
             max_glob = max(Y.max() for Y in observables)
-            obs_list_trimmed = np.array([Y[:min_len] for Y in observables])
+            obs_list_trimmed = np.array([Y[:min_num_frames] for Y in observables])
             #print(obs_list_trimmed.shape)
 
             cumMean_list = []
@@ -902,10 +902,13 @@ def main(args):
 
             # define any observable you want:
             def dist_atom1_atom2(traj, a1=8, a2=298):
-                return md.compute_distances(traj, [[a1, a2]]).ravel()
+                
+                result = md.compute_distances(traj, [[a1, a2]])
+                # Swith the first two dimensions to get shape (n_frames, n_pairs) instead of (n_pairs, n_frames)
+                return result.T
 
             def dihedral_a1_a2_a3_a4(traj, a1=4, a2=6, a3=8, a4=14):
-                return md.compute_dihedrals(traj, [[a1, a2, a3, a4]]).ravel()
+                return md.compute_dihedrals(traj, [[a1, a2, a3, a4]])
 
             def dihedral_adj_a1_a2_a3_a4_a5(traj, a1=4, a2=6, a3=8, a4=14, a5=16):
                 dihedrals = md.compute_dihedrals(traj, [[a1, a2, a3, a4], [a2, a3, a4, a5]])
@@ -1052,7 +1055,6 @@ def main(args):
                 a1=8, a2=298,   # optional; only for dist_atom1_atom2
                 #phi_psi="psi",  # optional; only for dihedral_phi_psi
                 #resid=11,        # optional; only for dihedral_phi_psi
-
             )
             # obs_name = ala_PMF_indicator.__name__
             # obs_title = "Alanine Dipeptide PMF Indicator"
@@ -1065,8 +1067,8 @@ def main(args):
             #     #a1=6, a2=8, a3=14, a4=16,  # psi
             # )
 
-            #print("observables shape:", "list of", len(observables), [obs.shape for obs in observables])
-            #print("traj_metadata_df:\n", traj_metadata_df)
+            print("observables shape:", "list of", len(observables), [obs.shape for obs in observables])
+            print("traj_metadata_df:\n", traj_metadata_df)
             #exit(2)
 
             observables_meta = []
@@ -1078,19 +1080,27 @@ def main(args):
                     "thermoIx": traj_metadata_df.iloc[ix]["thermoIx"],
                     })
 
-            #print("observables_meta", observables_meta)
+            print("observables_meta", observables_meta)
             #exit(2)
 
-            # Get cumulative mean and som for each trajectory
-            min_len = min(len(Y) for Y in observables)
-            max_len = max(len(Y) for Y in observables)
+            # Trim all trajectories to the same length (min_num_frames)
+            min_num_frames = min(Y.shape[len(Y.shape) - 1] for Y in observables)
+            max_num_frames = max(Y.shape[len(Y.shape) - 1] for Y in observables)
             min_glob = min(Y.min() for Y in observables)
             max_glob = max(Y.max() for Y in observables)
-            obs_list_trimmed = np.array([Y[:min_len] for Y in observables])
 
-            #print("obs_list_trimmed shape:", obs_list_trimmed.shape, flush=True)
-            #print("obs_list_trimmed:", obs_list_trimmed, flush=True)
+            obs_list_trimmed = np.array([arr[..., :min_num_frames] for arr in observables])
+
+            print("obs_list_trimmed shape:", obs_list_trimmed.shape, flush=True)
+            print("obs_list_trimmed:\n", obs_list_trimmed, flush=True)
             #exit(2)
+
+            nof_sims = obs_list_trimmed.shape[0]
+            nof_observables = obs_list_trimmed.shape[1]
+            num_frames = obs_list_trimmed.shape[2]
+            print(f"Number of sims: {nof_sims}, Number of observables: {nof_observables}, Number of frames: {num_frames}", flush=True)
+
+            exit(2)
 
             cumMean_list = []
             cumSom_list = []
@@ -1099,7 +1109,7 @@ def main(args):
                 cumMean_list.append(cumMean)
                 cumSom_list.append(cumSom)
 
-            #print("cumMean_list", [cumMean_list_entry.shape for cumMean_list_entry in cumMean_list], flush=True)
+            print("cumMean_list", [cumMean_list_entry.shape for cumMean_list_entry in cumMean_list], flush=True)
             #exit(2)
 
             cumRollStd_list = []
@@ -1183,7 +1193,7 @@ def main(args):
             fit_curve_list = []
             tau_opt_list = []
             for ix, obs in enumerate(obs_list_trimmed):
-                acf, fit_curve, tau_opt = stats.normalized_autocorrelation(obs, max_lag=min_len-1, estimate_tau=True)
+                acf, fit_curve, tau_opt = stats.normalized_autocorrelation(obs, max_lag=min_num_frames-1, estimate_tau=True)
                 acf_list.append(acf)
                 fit_curve_list.append(fit_curve)
                 tau_opt_list.append(tau_opt)
@@ -1193,7 +1203,7 @@ def main(args):
             if PRINT__:
                 #print("observables_meta", observables_meta)
                 #print("observables", observables)
-                print("Careful: trimmed to min length:", min_len, ". Max length:", max_len)
+                print("Careful: trimmed to min length:", min_num_frames, ". Max length:", max_num_frames)
             if PLOT__:
                 plotFN = None
                 if args.useAgg:

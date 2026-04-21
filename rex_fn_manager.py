@@ -193,6 +193,10 @@ class REXFNManager:
             pattern = os.path.join(self.dir, FNRoot + "*")
             FN_matches = glob.glob(pattern)
 
+            # print("self.dir", self.dir, "FNRoot", FNRoot)
+            # print("pattern", pattern)
+            # print("FN_matches", FN_matches)
+
             if not FN_matches:
                 print(f"Warning: No files found matching {FNRoot}*", file=sys.stderr)
                 continue
@@ -205,16 +209,38 @@ class REXFNManager:
                     print(f"[SKIP] Bad filename: {FN} -> {e}", file=sys.stderr)
                     continue
 
+                # print("seed", "sim_type", "thermo_index", seed, sim_type, thermo_index)
+                # for col, val in filters.items():
+                #     print("filters:", "col", "val", col, val)
+
                 # Apply filters (if any)
                 FN_eligible = True
                 for col, val in filters.items():
-                    if   (col == "seed") and (seed != val):
-                        FN_eligible = False
-                    elif (col == "sim_type") and (sim_type != val):
-                        FN_eligible = False
-                    elif (col == "thermoIx") and (int(thermo_index) != val):
-                        FN_eligible = False
+                    if col == "seed":
+                        # Check if seed matches scalar OR is inside the list of allowed values
+                        if isinstance(val, list):
+                            if seed not in val:
+                                FN_eligible = False
+                        elif seed != val:
+                            FN_eligible = False
+
+                    elif col == "sim_type":
+                        if isinstance(val, list):
+                            if sim_type not in val:
+                                FN_eligible = False
+                        elif sim_type != val:
+                            FN_eligible = False
+
+                    elif col == "thermoIx":
+                        current_thermo = int(thermo_index)
+                        if isinstance(val, list):
+                            if current_thermo not in val:
+                                FN_eligible = False
+                        elif current_thermo != val:
+                            FN_eligible = False
+
                 if not FN_eligible:
+                    #print("File NOT eligible")
                     continue
 
                 print(f"Reading {FN} ...", end=" ", flush=True)
