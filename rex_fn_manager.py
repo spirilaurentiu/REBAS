@@ -171,6 +171,69 @@ class REXFNManager:
         return obs, meta
     #
 
+    # Prepare output array read from all filenames
+    def prepareOutputArray(self, filters={}):
+        """ Prepare output array read from all filenames
+            In the end we should have an array of shape
+            (n_types, n_sims, n_replicas, n_obss, n_frames).
+        """
+        n_types, n_sims, n_replicas, n_obss, n_frames = 0, 0, 0, 0, 0
+        
+        for FNRoot in self.FNRoots:
+            pattern = os.path.join(self.dir, FNRoot + "*")
+            FN_matches = glob.glob(pattern)
+
+            print("self.dir", self.dir, "FNRoot", FNRoot)
+            print("pattern", pattern)
+            print("FN_matches", FN_matches)
+
+            if not FN_matches:
+                print(f"Warning: No files found matching {FNRoot}*", file=sys.stderr)
+                continue
+
+            for FN in FN_matches:
+
+                try:
+                    seed, sim_type, thermo_index = self.get_Info_FromFN(os.path.basename(FN))
+                except ValueError as e:
+                    print(f"[SKIP] Bad filename: {FN} -> {e}", file=sys.stderr)
+                    continue
+
+                # print("seed", "sim_type", "thermo_index", seed, sim_type, thermo_index)
+                # for col, val in filters.items():
+                #     print("filters:", "col", "val", col, val)
+
+                # Apply filters (if any)
+                FN_eligible = True
+                for col, val in filters.items():
+                    if col == "seed":
+                        # Check if seed matches scalar OR is inside the list of allowed values
+                        if isinstance(val, list):
+                            if seed not in val:
+                                FN_eligible = False
+                        elif seed != val:
+                            FN_eligible = False
+
+                    elif col == "sim_type":
+                        if isinstance(val, list):
+                            if sim_type not in val:
+                                FN_eligible = False
+                        elif sim_type != val:
+                            FN_eligible = False
+
+                    elif col == "thermoIx":
+                        current_thermo = int(thermo_index)
+                        if isinstance(val, list):
+                            if current_thermo not in val:
+                                FN_eligible = False
+                        elif current_thermo != val:
+                            FN_eligible = False
+
+                if not FN_eligible:
+                    #print("File NOT eligible")
+                    continue
+    #
+
     # Get trajectory data from all files. Deals with file globbing.
     def getTrajDataFromAllFiles(self, observable_func, *, filters={}, frames=None, **obs_kwargs):
         """ Get trajectory data from all files
@@ -186,6 +249,9 @@ class REXFNManager:
             - sim_type
         """
         
+        obsArray = self.prepareOutputArray(filters)
+        exit(2)
+
         obsList = []
         metadata_rows = []
 

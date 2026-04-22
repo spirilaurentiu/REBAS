@@ -21,6 +21,7 @@ class REXTrajData:
             "distance": lambda t, pair: md.compute_distances(t, [pair]).ravel(),
             "rg": lambda t: md.compute_rg(t),
         }        
+    #
 
     def _load_trajectory(self):
         """ MDTraj load trajectory
@@ -34,6 +35,7 @@ class REXTrajData:
         except Exception as e:
             print(f"Error loading {self.filepath}: {e}", file=sys.stderr)
             raise
+    #
 
     def get_traj(self):
         return self.traj
@@ -80,5 +82,6 @@ class REXTrajData:
         del self.traj
         self.traj = None
         ##
-
+    #
+    
 #endregion --------------------------------------------------------------------

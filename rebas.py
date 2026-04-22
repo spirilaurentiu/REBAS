@@ -13,7 +13,7 @@ import scipy.stats
 from scipy.signal import find_peaks
 
 import matplotlib
-matplotlib.use('Agg')
+#matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 from mystats import LS_Statistics
@@ -468,20 +468,20 @@ def main(args):
 
             cumMean_list = []
             cumSom_list = []
-            for ix, obs in enumerate(obs_list_trimmed):
-                cumMean, cumSom = cum_scum(obs)
-                cumMean_list.append(cumMean)
+            for ix, all_obss in enumerate(obs_list_trimmed):
+                all_cummean, cumSom = cum_scum(all_obss)
+                cumMean_list.append(all_cummean)
                 cumSom_list.append(cumSom)
 
             # Get ensemble means and stds across trajectories
             type1_obs = []
             type3_obs = []
-            for ix, obs in enumerate(obs_list_trimmed):
+            for ix, all_obss in enumerate(obs_list_trimmed):
                 sim_type = observables_meta[ix]["sim_type"]
                 if int(sim_type) == 1:
-                    type1_obs.append(obs)
+                    type1_obs.append(all_obss)
                 elif int(sim_type) == 3:
-                    type3_obs.append(obs)
+                    type3_obs.append(all_obss)
                 else:
                     sys.exit(f"Unknown sim_type {sim_type} encountered.")
 
@@ -504,8 +504,8 @@ def main(args):
 
             # Get autocorrelation functions
             acf_list = []
-            for ix, obs in enumerate(obs_list_trimmed):
-                acf = normalized_autocorrelation(obs, max_lag=min_num_frames - 1)
+            for ix, all_obss in enumerate(obs_list_trimmed):
+                acf = normalized_autocorrelation(all_obss, max_lag=min_num_frames - 1)
                 acf_list.append(acf)
 
             PRINT__, PLOT__ = True, True
@@ -690,9 +690,9 @@ def main(args):
 
             cumMean_list = []
             cumSom_list = []
-            for ix, obs in enumerate(obs_list_trimmed):
-                cumMean, cumSom = stats.cum_scum(obs)
-                cumMean_list.append(cumMean)
+            for ix, all_obss in enumerate(obs_list_trimmed):
+                all_cummean, cumSom = stats.cum_scum(all_obss)
+                cumMean_list.append(all_cummean)
                 cumSom_list.append(cumSom)
 
             ACF_min = min(len(acf) for acf in ACF_rhos)
@@ -900,15 +900,19 @@ def main(args):
             # pick your frame slice once:
             frames = slice(GLOBAL_BURNIN, GLOBAL_END)   # or slice(GLOBAL_BURNIN, None)
 
-            # define any observable you want:
+            # Distance
             def dist_atom1_atom2(traj, a1=8, a2=298):
-                
+                """ Calculate distance between two atoms across all frames. """
                 result = md.compute_distances(traj, [[a1, a2]])
                 # Swith the first two dimensions to get shape (n_frames, n_pairs) instead of (n_pairs, n_frames)
                 return result.T
 
+            # Dihedral
             def dihedral_a1_a2_a3_a4(traj, a1=4, a2=6, a3=8, a4=14):
-                return md.compute_dihedrals(traj, [[a1, a2, a3, a4]])
+                """ Calculate dihedral angle defined by four atoms across all frames. """
+                result = md.compute_dihedrals(traj, [[a1, a2, a3, a4]])
+
+                return result.T
 
             def dihedral_adj_a1_a2_a3_a4_a5(traj, a1=4, a2=6, a3=8, a4=14, a5=16):
                 dihedrals = md.compute_dihedrals(traj, [[a1, a2, a3, a4], [a2, a3, a4, a5]])
@@ -1072,7 +1076,7 @@ def main(args):
             #exit(2)
 
             observables_meta = []
-            for ix, obs in enumerate(observables):
+            for ix, all_obss in enumerate(observables):
                 observables_meta.append({
                     "sim_type": traj_metadata_df.iloc[ix]["sim_type"],
                     "seed": traj_metadata_df.iloc[ix]["seed"],
@@ -1089,66 +1093,89 @@ def main(args):
             min_glob = min(Y.min() for Y in observables)
             max_glob = max(Y.max() for Y in observables)
 
-            obs_list_trimmed = np.array([arr[..., :min_num_frames] for arr in observables])
+            obs_list_trimmed = np.array([Y[..., :min_num_frames] for Y in observables])
 
             print("obs_list_trimmed shape:", obs_list_trimmed.shape, flush=True)
-            print("obs_list_trimmed:\n", obs_list_trimmed, flush=True)
+            #print("obs_list_trimmed:\n", obs_list_trimmed, flush=True)
             #exit(2)
 
             nof_sims = obs_list_trimmed.shape[0]
             nof_observables = obs_list_trimmed.shape[1]
             num_frames = obs_list_trimmed.shape[2]
             print(f"Number of sims: {nof_sims}, Number of observables: {nof_observables}, Number of frames: {num_frames}", flush=True)
-
-            exit(2)
-
-            cumMean_list = []
-            cumSom_list = []
-            for ix, obs in enumerate(obs_list_trimmed):
-                cumMean, cumSom = stats.cum_scum(obs)
-                cumMean_list.append(cumMean)
-                cumSom_list.append(cumSom)
-
-            print("cumMean_list", [cumMean_list_entry.shape for cumMean_list_entry in cumMean_list], flush=True)
             #exit(2)
 
-            cumRollStd_list = []
-            roll_window = 500
-            for ix, cumMean in enumerate(cumMean_list):
-                cumRollStd = np.array([np.std(cumMean[t - roll_window : t + roll_window]) \
-                                       for t in range(roll_window, len(cumMean) - roll_window)])
-                
-                cumRollStd_list.append(cumRollStd)
+            cumMean_list = [[] for _ in range(nof_sims)]
+            cumSom_list = [[] for _ in range(nof_sims)]
+            for ix, all_obss in enumerate(obs_list_trimmed):
+                for obs in all_obss:
+                    cummean, cumSom = stats.cum_scum(obs)
+                    cumMean_list[ix].append(cummean)
+                    cumSom_list[ix].append(cumSom)
 
-            #print("cumRollStd_list", [cumRollStd_list_entry.shape for cumRollStd_list_entry in cumRollStd_list], flush=True)
+            cumMean_list = np.array(cumMean_list)
+            cumSom_list = np.array(cumSom_list)        
+
+            print("cumMean_list", cumMean_list.shape, flush=True)
+            print("cumSom_list", cumSom_list.shape, flush=True)
+            #exit(2)
+
+            cumRollStd_list = [[] for _ in range(nof_sims)]
+            roll_window = 500
+            for ix, all_cummean in enumerate(cumMean_list):
+                for cumMean in all_cummean:
+                    cumRollStd = np.array([np.std(cumMean[t - roll_window : t + roll_window]) \
+                                           for t in range(roll_window, len(cumMean) - roll_window)])
+                cumRollStd_list[ix].append(cumRollStd)
+
+            cumRollStd_list = np.array(cumRollStd_list)
+
+            print("cumRollStd_list", cumRollStd_list.shape, flush=True)
             #exit(2)
 
             # Split observables by type
-            type1_obs = []
-            type3_obs = []
-            for ix, obs in enumerate(obs_list_trimmed):
-                sim_type = observables_meta[ix]["sim_type"]
-                if int(sim_type) == 1:
-                    type1_obs.append(obs)
-                elif int(sim_type) == 3:
-                    type3_obs.append(obs)
-                else:
-                    sys.exit(f"Unknown sim_type {sim_type} encountered.")
+            type1_obs = None
+            type3_obs = None
+            for ix, all_obss in enumerate(obs_list_trimmed):
+                for obs in all_obss:
+                    sim_type = observables_meta[ix]["sim_type"]
+                    if int(sim_type) == 1:
+                        if type1_obs is None:
+                            type1_obs = [[obs]]
+                        else:
+                            type1_obs.append([obs])
+                    elif int(sim_type) == 3:
+                        if type3_obs is None:
+                            type3_obs = [[obs]]
+                        else:
+                            type3_obs.append([obs])
+                    else:
+                        sys.exit(f"Unknown sim_type {sim_type} encountered.")
 
-            #print("type1_obs", [entry.shape for entry in type1_obs], flush=True)
-            #print("type3_obs", [entry.shape for entry in type3_obs], flush=True)
-            #exit(2)
+            type1_obs = np.array(type1_obs)
+            type3_obs = np.array(type3_obs)
+
+            type1_num_sims = type1_obs.shape[0]
+            type1_num_observables = type1_obs.shape[1]
+            type1_num_frames = type1_obs.shape[2]
+            type3_num_sims = type3_obs.shape[0]
+            type3_num_observables = type3_obs.shape[1]
+            type3_num_frames = type3_obs.shape[2]
+
+            print("type1_obs", type1_obs.shape, flush=True)
+            print("type3_obs", type3_obs.shape, flush=True)
+            exit(2)
 
             # Ensemble means and stds across trajectories
             type1_obs_cummeans, type1_obs_cumstds = [], []
             type3_obs_cummeans, type3_obs_cumstds = [], []
-            for ix, cum_mean in enumerate(cumMean_list):
+            for ix, cumMean in enumerate(cumMean_list):
                 sim_type = observables_meta[ix]["sim_type"]
                 if int(sim_type) == 1:
-                    type1_obs_cummeans.append(cum_mean)
+                    type1_obs_cummeans.append(cumMean)
                     type1_obs_cumstds.append(cumSom_list[ix])
                 elif int(sim_type) == 3:
-                    type3_obs_cummeans.append(cum_mean)
+                    type3_obs_cummeans.append(cumMean)
                     type3_obs_cumstds.append(cumSom_list[ix])
                 else:
                     sys.exit(f"Unknown sim_type {sim_type} encountered.")
@@ -1192,8 +1219,8 @@ def main(args):
             acf_list = []
             fit_curve_list = []
             tau_opt_list = []
-            for ix, obs in enumerate(obs_list_trimmed):
-                acf, fit_curve, tau_opt = stats.normalized_autocorrelation(obs, max_lag=min_num_frames-1, estimate_tau=True)
+            for ix, all_obss in enumerate(obs_list_trimmed):
+                acf, fit_curve, tau_opt = stats.normalized_autocorrelation(all_obss, max_lag=min_num_frames-1, estimate_tau=True)
                 acf_list.append(acf)
                 fit_curve_list.append(fit_curve)
                 tau_opt_list.append(tau_opt)
@@ -1219,7 +1246,7 @@ def main(args):
                         save_path=plotFN
                        )
 
-            PRINT__, PLOT__ = True, True
+            PRINT__, PLOT__ = False, False
 
             if PRINT__:
                 pass
