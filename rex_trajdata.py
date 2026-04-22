@@ -18,7 +18,7 @@ class REXTrajData:
         self.traj = self._load_trajectory()
                 
         self._observables = {
-            "distance": lambda t, pair: md.compute_distances(t, [pair]).ravel(),
+            "distance": lambda t, pair: md.compute_distances(t, [pair]),
             "rg": lambda t: md.compute_rg(t),
         }        
     #
@@ -39,6 +39,15 @@ class REXTrajData:
 
     def get_traj(self):
         return self.traj
+    #
+
+    # Get XYZ coordinates for PCA or other analyses
+    def get_xyz(self, traj, superpose=True):
+        selection = self.traj.top.select("name CA")
+        if superpose:
+            self.traj.superpose(self.traj, frame=0, atom_indices=selection)
+
+        return self.traj.xyz[:, selection, :]
     #
 
     def get_traj_observable(self, observable="rg", *, frames=None, **kwargs):

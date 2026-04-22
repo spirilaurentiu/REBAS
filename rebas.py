@@ -13,7 +13,7 @@ import scipy.stats
 from scipy.signal import find_peaks
 
 import matplotlib
-#matplotlib.use('Agg')
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 from mystats import LS_Statistics
@@ -900,11 +900,15 @@ def main(args):
             # pick your frame slice once:
             frames = slice(GLOBAL_BURNIN, GLOBAL_END)   # or slice(GLOBAL_BURNIN, None)
 
-            # Distance
-            def dist_atom1_atom2(traj, a1=8, a2=298):
-                """ Calculate distance between two atoms across all frames. """
-                result = md.compute_distances(traj, [[a1, a2]])
-                # Swith the first two dimensions to get shape (n_frames, n_pairs) instead of (n_pairs, n_frames)
+            FNManager = REXFNManager(args.dir, args.inFNRoots, args.cols, topology=args.topology)
+            FNManager.prepareOutputArraySize(filters=filters)
+
+            #region Extractor functions for trajectory observables
+            
+            # Distances
+            def distances(traj, pairs=[[8, 298], [100, 200]]):
+                """ Calculate distances between multiple pairs. """
+                result = md.compute_distances(traj, pairs)
                 return result.T
 
             # Dihedral
@@ -975,7 +979,6 @@ def main(args):
                 print(f"Std {phi_psi} for residue {resid}: {torsions_std:.3f} radians ({np.rad2deg(torsions_std):.1f} degrees)")
 
                 return torsions
-            #
 
             ALA1_BASINS = {
                 "C5":       {"phi_min": np.deg2rad(-180), "phi_max": np.deg2rad(-95), "psi_min": np.deg2rad(105 ), "psi_max": np.deg2rad(180)},
@@ -1043,348 +1046,168 @@ def main(args):
                 choices = [0.0, 0.25, 0.5, 0.75]
                 states = np.select(conditions, choices, default=1.0)
                 return states
-            #
+            
+            #endregion # extractors
 
+            DO_GEOMETRY, DO_PCA = False, True
 
-            # Get trajectory data: (list of arrays of some observable, and 
-            # metadata containing filepath, n_frames, n_atoms, frames, seed, sim_type)
-            FNManager = REXFNManager(args.dir, args.inFNRoots, args.cols, topology=args.topology)
-            obs_name = dist_atom1_atom2.__name__
-            obs_title = "End-to-End Distance"
-            #obs_title = "Trp-Cage PMF Indicator"
-            (observables, traj_metadata_df) = FNManager.getTrajDataFromAllFiles(
-                dist_atom1_atom2,
-                filters=filters,
-                frames=frames,
-                a1=8, a2=298,   # optional; only for dist_atom1_atom2
-                #phi_psi="psi",  # optional; only for dihedral_phi_psi
-                #resid=11,        # optional; only for dihedral_phi_psi
-            )
-            # obs_name = ala_PMF_indicator.__name__
-            # obs_title = "Alanine Dipeptide PMF Indicator"
-            # (observables, traj_metadata_df) = FNManager.getTrajDataFromAllFiles(
-            #     ala_PMF_indicator,
-            #     filters=filters,
-            #     frames=frames,
-            #     a1=4, a2=6, a3=8, a4=14, a5=16,  # dihedral_adj_a1_a2_a3_a4_a5
-            #     #a1=4, a2=6, a3=8, a4=14,  # phi
-            #     #a1=6, a2=8, a3=14, a4=16,  # psi
-            # )
+            if DO_GEOMETRY:
 
-            print("observables shape:", "list of", len(observables), [obs.shape for obs in observables])
-            print("traj_metadata_df:\n", traj_metadata_df)
-            #exit(2)
+                # Get trajectory data 
+                obs_name = distances.__name__
+                obs_title = "End-to-End Distance"
+                #obs_title = "Trp-Cage PMF Indicator"
+                (observables, u_types, u_repeats, u_thermos) = FNManager.getTrajDataFromAllFiles(
+                    distances,
+                    filters=filters,
+                    frames=frames,
+                    pairs=[[8, 298], [100, 200]],
+                    #phi_psi="psi",  # optional; only for dihedral_phi_psi
+                    #resid=11,       # optional; only for dihedral_phi_psi
+                )
 
-            observables_meta = []
-            for ix, all_obss in enumerate(observables):
-                observables_meta.append({
-                    "sim_type": traj_metadata_df.iloc[ix]["sim_type"],
-                    "seed": traj_metadata_df.iloc[ix]["seed"],
-                    "filepath": traj_metadata_df.iloc[ix]["filepath"],
-                    "thermoIx": traj_metadata_df.iloc[ix]["thermoIx"],
-                    })
+                print("observables.shape", observables.shape)
+                n_types, n_repeats, n_thermos, n_observables, n_frames = observables.shape
+                # print("observables", observables)
+                # print("u_types", u_types)
+                # print("u_repeats", u_repeats)
+                # print("u_thermos", u_thermos)
 
-            print("observables_meta", observables_meta)
-            #exit(2)
+                PRINT__, PLOT__ = True, True
+                if PRINT__:
+                    print("Unique sim types:", u_types)
+                    print("Unique repeats:", u_repeats)
+                    print("Unique thermos:", u_thermos)
+                if PLOT__:
+                    plotFN = None
+                    if args.useAgg:
+                        plotFN = f"traj_{obs_name}.png"
 
-            # Trim all trajectories to the same length (min_num_frames)
-            min_num_frames = min(Y.shape[len(Y.shape) - 1] for Y in observables)
-            max_num_frames = max(Y.shape[len(Y.shape) - 1] for Y in observables)
-            min_glob = min(Y.min() for Y in observables)
-            max_glob = max(Y.max() for Y in observables)
-
-            obs_list_trimmed = np.array([Y[..., :min_num_frames] for Y in observables])
-
-            print("obs_list_trimmed shape:", obs_list_trimmed.shape, flush=True)
-            #print("obs_list_trimmed:\n", obs_list_trimmed, flush=True)
-            #exit(2)
-
-            nof_sims = obs_list_trimmed.shape[0]
-            nof_observables = obs_list_trimmed.shape[1]
-            num_frames = obs_list_trimmed.shape[2]
-            print(f"Number of sims: {nof_sims}, Number of observables: {nof_observables}, Number of frames: {num_frames}", flush=True)
-            #exit(2)
-
-            cumMean_list = [[] for _ in range(nof_sims)]
-            cumSom_list = [[] for _ in range(nof_sims)]
-            for ix, all_obss in enumerate(obs_list_trimmed):
-                for obs in all_obss:
-                    cummean, cumSom = stats.cum_scum(obs)
-                    cumMean_list[ix].append(cummean)
-                    cumSom_list[ix].append(cumSom)
-
-            cumMean_list = np.array(cumMean_list)
-            cumSom_list = np.array(cumSom_list)        
-
-            print("cumMean_list", cumMean_list.shape, flush=True)
-            print("cumSom_list", cumSom_list.shape, flush=True)
-            #exit(2)
-
-            cumRollStd_list = [[] for _ in range(nof_sims)]
-            roll_window = 500
-            for ix, all_cummean in enumerate(cumMean_list):
-                for cumMean in all_cummean:
-                    cumRollStd = np.array([np.std(cumMean[t - roll_window : t + roll_window]) \
-                                           for t in range(roll_window, len(cumMean) - roll_window)])
-                cumRollStd_list[ix].append(cumRollStd)
-
-            cumRollStd_list = np.array(cumRollStd_list)
-
-            print("cumRollStd_list", cumRollStd_list.shape, flush=True)
-            #exit(2)
-
-            # Split observables by type
-            type1_obs = None
-            type3_obs = None
-            for ix, all_obss in enumerate(obs_list_trimmed):
-                for obs in all_obss:
-                    sim_type = observables_meta[ix]["sim_type"]
-                    if int(sim_type) == 1:
-                        if type1_obs is None:
-                            type1_obs = [[obs]]
-                        else:
-                            type1_obs.append([obs])
-                    elif int(sim_type) == 3:
-                        if type3_obs is None:
-                            type3_obs = [[obs]]
-                        else:
-                            type3_obs.append([obs])
-                    else:
-                        sys.exit(f"Unknown sim_type {sim_type} encountered.")
-
-            type1_obs = np.array(type1_obs)
-            type3_obs = np.array(type3_obs)
-
-            type1_num_sims = type1_obs.shape[0]
-            type1_num_observables = type1_obs.shape[1]
-            type1_num_frames = type1_obs.shape[2]
-            type3_num_sims = type3_obs.shape[0]
-            type3_num_observables = type3_obs.shape[1]
-            type3_num_frames = type3_obs.shape[2]
-
-            print("type1_obs", type1_obs.shape, flush=True)
-            print("type3_obs", type3_obs.shape, flush=True)
-            exit(2)
-
-            # Ensemble means and stds across trajectories
-            type1_obs_cummeans, type1_obs_cumstds = [], []
-            type3_obs_cummeans, type3_obs_cumstds = [], []
-            for ix, cumMean in enumerate(cumMean_list):
-                sim_type = observables_meta[ix]["sim_type"]
-                if int(sim_type) == 1:
-                    type1_obs_cummeans.append(cumMean)
-                    type1_obs_cumstds.append(cumSom_list[ix])
-                elif int(sim_type) == 3:
-                    type3_obs_cummeans.append(cumMean)
-                    type3_obs_cumstds.append(cumSom_list[ix])
-                else:
-                    sys.exit(f"Unknown sim_type {sim_type} encountered.")
-
-            #print("type1_obs_cummeans", [entry.shape for entry in type1_obs_cummeans], flush=True)
-            #print("type3_obs_cummeans", [entry.shape for entry in type3_obs_cummeans], flush=True)
-
-            type1_ens_means, type1_ens_stds = stats.ensemble_mean_and_std(type1_obs)
-            type3_ens_means, type3_ens_stds = stats.ensemble_mean_and_std(type3_obs)
-            type1_ens_cummeans, type1_ens_cumstds = stats.ensemble_mean_and_std(type1_obs_cummeans)
-            type3_ens_cummeans, type3_ens_cumstds = stats.ensemble_mean_and_std(type3_obs_cummeans)
-
-            #print("type1_ens_means", type1_ens_means.shape, flush=True)
-            #print("type3_ens_means", type3_ens_means.shape, flush=True)
-            #print("type1_ens_cummeans", type1_ens_cummeans.shape, flush=True)
-            #print("type3_ens_cummeans", type3_ens_cummeans.shape, flush=True)
-            #exit(2)
-
-            # Ensemble histograms
-            nbins = 50
-            type1_ens_hists = stats.ensemble_histogram_plus(
-                type1_obs,
-                density=True,
-                bins=nbins,
-                obs_range=(min_glob, max_glob)
-            )
-            type3_ens_hists = stats.ensemble_histogram_plus(
-                type3_obs,
-                density=True,
-                bins=nbins,
-                obs_range=(min_glob, max_glob)
-            )
-            assert np.allclose(type1_ens_hists["bin_centers"], type3_ens_hists["bin_centers"]), "Bin centers do not match between types."
-
-            #print("type1_ens_hists", type1_ens_hists.keys())
-            #print("type1_ens_bin_centers", type1_ens_hists["bin_centers"].shape)
-            #print("type1_ens_hists mean ", type1_ens_hists["mean"].shape)
-            #exit(2)
-
-            # Get autocorrelation functions per trajectory
-            acf_list = []
-            fit_curve_list = []
-            tau_opt_list = []
-            for ix, all_obss in enumerate(obs_list_trimmed):
-                acf, fit_curve, tau_opt = stats.normalized_autocorrelation(all_obss, max_lag=min_num_frames-1, estimate_tau=True)
-                acf_list.append(acf)
-                fit_curve_list.append(fit_curve)
-                tau_opt_list.append(tau_opt)
-
-            PRINT__, PLOT__ = True, True
-
-            if PRINT__:
-                #print("observables_meta", observables_meta)
-                #print("observables", observables)
-                print("Careful: trimmed to min length:", min_num_frames, ". Max length:", max_num_frames)
-            if PLOT__:
-                plotFN = None
-                if args.useAgg:
-                    plotFN = f"traj_obs.png"
-                plot1D(obs_list_trimmed,
-                       title=obs_title,
-                       xlabel="Frame",
-                       ylabel=obs_name,
-                       labels=[f"{observables_meta[ix]['seed']} type {observables_meta[ix]['sim_type']}" \
-                               for ix in range(len(obs_list_trimmed))],
-                        colors=[colorByType(observables_meta[ix]['sim_type']) \
-                               for ix in range(len(obs_list_trimmed))],
+                    simIx = 0
+                    replicaIx = 0
+                    obsIx = 0
+                    Y_series = observables[:, simIx, replicaIx, obsIx,:]
+                    print(Y_series.shape)
+                    
+                    plot1D(
+                        Y = Y_series,
+                        title=obs_title,
+                        xlabel="Frame",
+                        ylabel=obs_name,
+                        labels=[f"Seed {u_repeats[ix]} Type {u_types[ix]} Thermo {u_thermos[ix]}" for ix in range(len(observables))],
+                        colors=[colorByType(u_types[ix]) for ix in range(len(observables))],
                         save_path=plotFN
-                       )
+                    )
+                
+                    if args.useAgg:
+                        plt.savefig(plotFN)
 
-            PRINT__, PLOT__ = False, False
+                # Cumulative mean and std
+                cummean_obs = np.full_like(observables, fill_value=np.nan)
+                cumstd_obs = np.full_like(observables, fill_value=np.nan)
 
-            if PRINT__:
-                pass
-                #print("cumMean_list", cumMean_list)
-            if PLOT__:
-                plotFN = None
-                if args.useAgg:
-                    plotFN = f"traj_cummean.png"                 
-                plot1D(cumMean_list,
-                       title="Cumulative Mean of" + obs_title,
-                       xlabel="Frame",
-                       ylabel=obs_name + " cumulative mean",
-                       labels=[f"{observables_meta[ix]['seed']} type {observables_meta[ix]['sim_type']}" \
-                               for ix in range(len(cumMean_list))],
-                        colors=[colorByType(observables_meta[ix]['sim_type']) \
-                               for ix in range(len(cumMean_list))],
-                        save_path=plotFN
-                       )
+                for typeIx in range(n_types):
+                    for repeatIx in range(n_repeats):
+                        for thermoIx in range(n_thermos):
+                            for obsIx in range(n_observables):
+                                obs = observables[typeIx, repeatIx, thermoIx, obsIx,:]
+                                cummean = np.cumsum(obs) / (np.arange(len(obs)) + 1)
+                                cumstd = np.sqrt(np.cumsum((obs - cummean)**2) / (np.arange(len(obs)) + 1))
+                                cummean_obs[typeIx, repeatIx, thermoIx, obsIx,:] = cummean
+                                cumstd_obs[typeIx, repeatIx, thermoIx, obsIx,:] = cumstd
 
-            if PRINT__:    
-                pass
-            if PLOT__:
-                plotFN = None
-                if args.useAgg:
-                    plotFN = f"traj_cumstd.png"
-                plot1D(cumSom_list,
-                       title="Cumulative standard deviation of the mean of" + obs_title,
-                       xlabel="Frame",
-                       ylabel=obs_name + " cumulative som",
-                       labels=[f"{observables_meta[ix]['seed']} type {observables_meta[ix]['sim_type']}" \
-                               for ix in range(len(cumSom_list))],
-                        colors=[colorByType(observables_meta[ix]['sim_type']) \
-                               for ix in range(len(cumSom_list))],
-                        save_path=plotFN
-                       )
+                PRINT__, PLOT__ = True, True
+                if PRINT__:
+                    print("cum_mean shape:", cummean_obs.shape)
+                    print("cum_std shape:", cumstd_obs.shape)
+                if PLOT__:
+                    plot1D(
+                        Y=cummean_obs[:, simIx, replicaIx, obsIx,:],
+                        title=obs_title + " Cumulative Mean",
+                        xlabel="Frame",
+                        ylabel=obs_name + " Cumulative Mean",
+                        labels=[f"Seed {u_repeats[ix]} Type {u_types[ix]} Thermo {u_thermos[ix]}" for ix in range(len(observables))],
+                        colors=[colorByType(u_types[ix]) for ix in range(len(observables))],
+                        save_path=f"traj_{obs_name}_cum_mean.png" if args.useAgg else None
+                    )
 
-            if PRINT__:
-                pass
-            if PLOT__:
-                plotFN = None
-                if args.useAgg:
-                    plotFN = f"traj_cumrollstd.png"
-                plot1D(cumRollStd_list,
-                       title="Rolling std (window=100 frames) of the cumulative mean of" + obs_title,
-                       xlabel="Frame",
-                       ylabel=obs_name + " cumulative mean rolling std",
-                       labels=[f"{observables_meta[ix]['seed']} type {observables_meta[ix]['sim_type']}" \
-                               for ix in range(len(cumRollStd_list))],
-                        colors=[colorByType(observables_meta[ix]['sim_type']) \
-                               for ix in range(len(cumRollStd_list))],
-                        save_path=plotFN
-                       )
+                    plot1D(
+                        Y=cumstd_obs[:, simIx, replicaIx, obsIx,:],
+                        title=obs_title + " Cumulative Std",
+                        xlabel="Frame",
+                        ylabel=obs_name + " Cumulative Std",
+                        labels=[f"Seed {u_repeats[ix]} Type {u_types[ix]} Thermo {u_thermos[ix]}" for ix in range(len(observables))],
+                        colors=[colorByType(u_types[ix]) for ix in range(len(observables))],
+                        save_path=f"traj_{obs_name}_cum_std.png" if args.useAgg else None
+                    )
 
-            if PRINT__:
-                print("type1_ens_means", type1_ens_cummeans.shape)
-                print("type1_ensemble_stds", type1_ens_cumstds.shape)
-            if PLOT__:
-                plotFN = None
-                if args.useAgg:
-                    plotFN = f"traj_ens_cummean.png"
-                plot1D([type1_ens_cummeans, type3_ens_cummeans],
-                       #X=[type1_ens_means, type3_ens_means],
-                       Yerr=[type1_ens_cumstds, type3_ens_cumstds], Yerr_every=10,
-                       title="Ensemble mean of cumulative mean of" + obs_title,
-                       xlabel="Frame",
-                       ylabel=obs_name + " ensemble cumulative mean",
-                       labels=["type 1", "type 3"],
-                       colors=[colorByType(1), colorByType(3)],
-                       save_path=plotFN
-                       )
-                plotFN = None
-                if args.useAgg:
-                    plotFN = f"traj_ens_cumstd.png"
-                plot1D([type1_ens_cumstds, type3_ens_cumstds],
-                       #X=[type1_ens_means, type3_ens_means],
-                       #Yerr=[type1_ensemble_stds, type3_ensemble_stds],
-                       title="Ensemble mean of cumulative std of the mean of" + obs_title,
-                       xlabel="Frame",
-                       ylabel=obs_name + " ensemble cumulative som",
-                       labels=["type 1", "type 3"],
-                       colors=[colorByType(1), colorByType(3)],
-                       save_path=plotFN
-                       )
+                if not args.useAgg:
+                    plt.show()
+                plt.close()            
 
-            if PRINT__:
-                print("type1 stats (mean, std, entropy, num_modes):")
-                print(type1_ens_hists["entropy"], type1_ens_hists["num_modes"])
-                print("type3 stats (mean, std, entropy, num_modes):")
-                print(type3_ens_hists["entropy"], type3_ens_hists["num_modes"])
-            if PLOT__:
-                plotFN = None
-                if args.useAgg:
-                    plotFN = f"traj_obs_distrib.png"
-                plot1D([type1_ens_hists["mean"], type3_ens_hists["mean"]],
-                       X=[type1_ens_hists["bin_centers"], type3_ens_hists["bin_centers"]],
-                       Yerr=[type1_ens_hists["std"], type3_ens_hists["std"]],
-                       title="Histogram of" + obs_title,
-                       xlabel=obs_name,
-                       ylabel="Probability density",
-                       labels=["type 1", "type 3"],
-                       colors=[colorByType(1), colorByType(3)],
-                       save_path=plotFN
-                       )
+            if DO_PCA:
 
-            if PRINT__:
-                #print("fit_curve_list", fit_curve_list)
-                print("tau_opt_list", tau_opt_list)
-            if PLOT__:
-                plotFN = None
-                if args.useAgg:
-                    plotFN = f"traj_acf.png"
-                plot1D(acf_list,
-                       title="Autocorrelation of" + obs_title,
-                       xlabel="Lag (frames)",
-                       ylabel="Autocorrelation",
-                       labels=[f"{observables_meta[ix]['seed']} type {observables_meta[ix]['sim_type']}" \
-                               for ix in range(len(acf_list))],
-                        colors=[colorByType(observables_meta[ix]['sim_type']) \
-                               for ix in range(len(acf_list))],
-                        save_path=plotFN
-                       )
-                plotFN = None
-                if args.useAgg:
-                    plotFN = f"traj_acf_fit.png"
-                plot1D(fit_curve_list,
-                       title="Fitted exponential decay to ACF of " + obs_title,
-                       xlabel="Lag (frames)",
-                       ylabel="Fitted ACF",
-                       labels=[f"{observables_meta[ix]['seed']} type {observables_meta[ix]['sim_type']} (τ={tau_opt_list[ix]:.2f})" \
-                               for ix in range(len(fit_curve_list))],
-                        colors=[colorByType(observables_meta[ix]['sim_type']) \
-                               for ix in range(len(fit_curve_list))],
-                        save_path=plotFN
-                          )
+                # Principal component analysis (PCA)
+                from sklearn.decomposition import PCA
 
-            if not args.useAgg:
-                plt.show()
-            plt.close()
+                #print("FNManager.entries", FNManager.entries)
+                (result, types, repeats, thermos) = \
+                FNManager.PCA(filters=filters, frames=frames)
+
+                print("PCA result", result)
+
+                plt.figure(figsize=(10, 7))
+                prop_cycle = plt.rcParams['axes.prop_cycle']
+                colors = prop_cycle.by_key()['color']
+
+                # Iterate through the processed trajectories
+                for entry in result:
+                    indices = entry['indices']
+                    projection = entry['projection']
+                    
+                    # Use the 'type' index to select a consistent color for the group
+                    type_idx = indices[0]
+                    label = f"Type {types[type_idx]} (Rep {repeats[indices[1]]})"
+                    
+                    # Plot PC1 vs PC2
+                    plt.scatter(
+                        projection[:, 0], 
+                        projection[:, 1], 
+                        alpha=0.4, 
+                        s=5, 
+                        label=label,
+                        color=colors[type_idx % len(colors)]
+                    )
+
+                # Add variance explained to the axes (taken from the first entry)
+                exp_var = result[0]['explained_variance']
+                plt.xlabel(f"PC1 ({exp_var[0]*100:.1f}%)")
+                plt.ylabel(f"PC2 ({exp_var[1]*100:.1f}%)")
+
+                plt.title("PCA Essential Dynamics Projection")
+                # If you have many trajectories, the legend might be huge; 
+                # you might want to handle unique labels only.
+                plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+                plt.tight_layout()
+                plt.savefig("pca_projection.png", dpi=300)
+
+
+                PRINT__, PLOT__ = True, True
+                if PRINT__:
+                    pass
+                if PLOT__:
+                    pass
+
+
+                if not args.useAgg:
+                    plt.show()
+                plt.close()
+
+
+
+
+
+
 
     #region Restart: write restart files into self.dir/restDir/restDir.<seed>
     if (args.restDir):

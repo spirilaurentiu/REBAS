@@ -2,6 +2,8 @@
 # -----------------------------------------------------------------------------
 #                      Robosample file manager
 #region REXFileManager --------------------------------------------------------
+from unittest import result
+
 import MDAnalysis as mda
 #from MDAnalysis.coordinates.TRJ import Restart
 import mdtraj as md
@@ -12,6 +14,7 @@ import sys
 import glob
 import pandas as pd
 import numpy as np
+from utils import *
 
 import scipy.stats
 from scipy.signal import find_peaks
@@ -40,7 +43,10 @@ class REXFNManager:
         self.topology = topology
         self.OUTPUT_DATA = False
         self.TRAJECTORY_DATA = False
+        
+        self.entries, (self.n_types, self.n_sims, self.n_reps) = None, (0, 0, 0)
         #self.rexTrajData = None
+
 
     # Get seed and simulation type from filename. Determine if OUT or DCD
     def get_Info_FromFN(self, FN):
@@ -172,70 +178,243 @@ class REXFNManager:
     #
 
     # Prepare output array read from all filenames
-    def prepareOutputArray(self, filters={}):
-        """ Prepare output array read from all filenames
-            In the end we should have an array of shape
-            (n_types, n_sims, n_replicas, n_obss, n_frames).
-        """
-        n_types, n_sims, n_replicas, n_obss, n_frames = 0, 0, 0, 0, 0
-        
+    def prepareOutputArraySize(self, filters={}):
+        """ Prepare output array metadata and calculate dimensions """
+        entries = []
+
         for FNRoot in self.FNRoots:
             pattern = os.path.join(self.dir, FNRoot + "*")
             FN_matches = glob.glob(pattern)
-
-            print("self.dir", self.dir, "FNRoot", FNRoot)
-            print("pattern", pattern)
-            print("FN_matches", FN_matches)
 
             if not FN_matches:
                 print(f"Warning: No files found matching {FNRoot}*", file=sys.stderr)
                 continue
 
             for FN in FN_matches:
-
                 try:
-                    seed, sim_type, thermo_index = self.get_Info_FromFN(os.path.basename(FN))
+                    FN_basename = os.path.basename(FN)
+                    seed, sim_type, thermo_index = self.get_Info_FromFN(FN_basename)
+                    repeatIx = int(seed) % 100
                 except ValueError as e:
                     print(f"[SKIP] Bad filename: {FN} -> {e}", file=sys.stderr)
                     continue
 
-                # print("seed", "sim_type", "thermo_index", seed, sim_type, thermo_index)
-                # for col, val in filters.items():
-                #     print("filters:", "col", "val", col, val)
-
-                # Apply filters (if any)
+                # Apply filters
                 FN_eligible = True
                 for col, val in filters.items():
-                    if col == "seed":
-                        # Check if seed matches scalar OR is inside the list of allowed values
+                    current_val = {"seed": seed,
+                                   "sim_type": sim_type,
+                                   "thermoIx": int(thermo_index)}.get(col)
+                    if val is not None:
                         if isinstance(val, list):
-                            if seed not in val:
+                            if current_val not in val:
                                 FN_eligible = False
-                        elif seed != val:
+                        elif current_val != val:
                             FN_eligible = False
 
-                    elif col == "sim_type":
-                        if isinstance(val, list):
-                            if sim_type not in val:
-                                FN_eligible = False
-                        elif sim_type != val:
-                            FN_eligible = False
+                if FN_eligible:
+                    # Column indices: 0:type, 1:seed, 2:repeat, 3:thermo, 4:filepath
+                    entries.append([int(sim_type),
+                                    int(seed),
+                                    int(repeatIx),
+                                    int(thermo_index),
+                                    FN])
 
-                    elif col == "thermoIx":
-                        current_thermo = int(thermo_index)
-                        if isinstance(val, list):
-                            if current_thermo not in val:
-                                FN_eligible = False
-                        elif current_thermo != val:
-                            FN_eligible = False
+        if not entries:
+            raise ValueError("No eligible files found after filtering.")
 
-                if not FN_eligible:
-                    #print("File NOT eligible")
-                    continue
+        # Convert to object array to handle mixed int and string (path)
+        entries = np.array(entries, dtype=object)
+
+        # Sort: Type (0) -> Repeat (2) -> Thermo (3)
+        sort_indices = np.lexsort((
+            entries[:, 3].astype(int), 
+            entries[:, 2].astype(int), 
+            entries[:, 0].astype(int)
+        ))
+        
+        sorted_entries = entries[sort_indices]
+
+        n_types = len(np.unique(sorted_entries[:, 0]))
+        n_sims = len(np.unique(sorted_entries[:, 2]))
+        n_replicas = len(np.unique(sorted_entries[:, 3]))
+        
+        self.entries = sorted_entries
+        self.n_types = n_types
+        self.n_sims = n_sims
+        self.n_reps = n_replicas
+
+        return sorted_entries, (n_types, n_sims, n_replicas)
+    #
+
+    # Get trajectory data extracted with passed functions
+    def getTrajDataFromAllFiles(self, observable_func, *, filters={}, frames=None, **obs_kwargs):
+        
+        # 1. Get metadata and dimensions from filenames
+        if self.entries is None:
+            self.entries, (self.n_types, self.n_sims, self.n_reps) = self.prepareOutputArraySize(filters)
+        
+        uniq_sorted_types = np.unique(self.entries[:, 0].astype(int))
+        uniq_sorted_repeats = np.unique(self.entries[:, 2].astype(int))
+        uniq_sorted_thermos = np.unique(self.entries[:, 3].astype(int))
+
+        # print("n_types", n_types, "n_sims", n_sims, "n_reps", n_reps)
+        # print("Unique types:", uniq_sorted_types)
+        # print("Unique repeats:", uniq_sorted_repeats)
+        # print("Unique thermos:", uniq_sorted_thermos)
+
+        # --- PASS 1: Probe lengths and determine n_obs_dim ---
+        valid_results = []
+        n_frames_list = []
+        n_obs_dim = 1
+
+        for row in self.entries:
+            s_type, seed, repeatIx, thermoIx, FN = row
+            #print("s_type", s_type, "seed", seed, "r_ix", repeatIx, "t_ix", thermoIx, "FN", FN)
+
+            try:
+                print(f"Reading {FN} ...", end=" ", flush=True)
+                obs, meta = self.getTrajDataFromFile(
+                    FN, seed, s_type, thermoIx, observable_func,
+                    frames=frames, **obs_kwargs
+                )
+
+                # Capture dimensions
+                n_frames_list.append(obs.shape[-1])
+                if obs.ndim > 1:
+                    n_obs_dim = obs.shape[0]
+
+                # Map to indices immediately
+                typeIx = np.searchsorted(uniq_sorted_types, int(s_type)) # is NOT the same as type
+                repeatIx = np.searchsorted(uniq_sorted_repeats, int(repeatIx))
+                thermoIx = np.searchsorted(uniq_sorted_thermos, int(thermoIx))
+                
+                # Store data and indices in memory
+                valid_results.append(([typeIx, repeatIx, thermoIx], obs))
+                print("done.")
+
+            except Exception as e:
+                print(f"  [SKIP] {os.path.basename(FN)}: {e}")
+
+        if not valid_results:
+            return None
+
+        min_n_frames = min(n_frames_list)
+        max_n_frames = max(n_frames_list)
+
+        #print(f"Probed {len(valid_results)} valid trajectories. Frame counts range from {min_n_frames} to {max_n_frames}. Observable dimension: {n_obs_dim}.")
+        # for vr in valid_results:
+        #     print(vr)
+
+        result = np.full((self.n_types, self.n_sims, self.n_reps, n_obs_dim, min_n_frames), np.nan)
+
+        for vr in valid_results:
+            (typeIx, repeatIx, thermoIx), obs = vr
+            n_frames = obs.shape[-1]
+
+            if n_frames < min_n_frames:
+                print(f"  [WARN] Trajectory has {n_frames} frames, which is less than the minimum of {min_n_frames}. Skipping.")
+                continue
+
+            # Truncate if necessary
+            obs_to_store = obs[..., :min_n_frames] if n_frames > min_n_frames else obs
+            result[typeIx, repeatIx, thermoIx, ..., :obs_to_store.shape[-1]] = obs_to_store
+
+        return (result, uniq_sorted_types, uniq_sorted_repeats, uniq_sorted_thermos)
+    #
+
+    # Perform PCA on all trajectories combined and return PCA for each
+    def PCA(self, filters={}, frames=None, top="trpch/ligand.prmtop", **obs_kwargs):
+        """ Perform PCA on all trajectories combined and return PCA for each trajectory """
+        from sklearn.decomposition import PCA as skPCA        
+        
+        # 1. Get metadata and dimensions from filenames
+        if self.entries is None:
+            self.entries, (self.n_types, self.n_sims, self.n_reps) = self.prepareOutputArraySize(filters)
+
+        uniq_sorted_types = np.unique(self.entries[:, 0].astype(int))
+        uniq_sorted_repeats = np.unique(self.entries[:, 2].astype(int))
+        uniq_sorted_thermos = np.unique(self.entries[:, 3].astype(int))
+
+        # print("n_types", n_types, "n_sims", n_sims, "n_reps", n_reps)
+        # print("Unique types:", uniq_sorted_types)
+        # print("Unique repeats:", uniq_sorted_repeats)
+        # print("Unique thermos:", uniq_sorted_thermos)
+
+        # --- PASS 1: Probe lengths and determine n_obs_dim ---
+        valid_results = []
+        n_frames_list = []
+        n_obs_dim = 1
+
+        for row in self.entries:
+            s_type, seed, repeatIx, thermoIx, FN = row
+            print("s_type", s_type, "seed", seed, "r_ix", repeatIx, "t_ix", thermoIx, "FN", FN)
+
+            try:
+                print(f"Reading {FN} ...", end=" ", flush=True)
+                traj = md.load_dcd(FN, top=top)
+
+                # Capture dimensions
+                n_frames_list.append(traj.n_frames)
+                if traj.n_frames > 1:
+                    n_obs_dim = traj.n_atoms
+
+                # Map to indices immediately
+                typeIx = np.searchsorted(uniq_sorted_types, int(s_type)) # is NOT the same as type
+                repeatIx = np.searchsorted(uniq_sorted_repeats, int(repeatIx))
+                thermoIx = np.searchsorted(uniq_sorted_thermos, int(thermoIx))
+                
+                # Store data and indices in memory
+                valid_results.append(([typeIx, repeatIx, thermoIx], traj))
+                print("done.")
+
+            except Exception as e:
+                print(f"  [SKIP] {os.path.basename(FN)}: {e}")
+
+        if not valid_results:
+            return None
+
+        # Truncate to minimum frame count to keep everything balanced
+        min_n_frames = min(n_frames_list)
+        for ix, vr in enumerate(valid_results):
+            valid_results[ix] = (vr[0], vr[1][:min_n_frames])
+
+        # Combine for PCA
+        combined_traj = md.join([vr[1] for vr in valid_results])
+        
+        # Select CA for alignment AND analysis
+        selection = combined_traj.top.select("name CA")
+        
+        # Superimpose to first frame of first traj to remove global rotation/translation
+        combined_traj.superpose(combined_traj, frame=0, atom_indices=selection)
+
+        # Reshape for sklearn: (n_frames, n_atoms * 3)
+        # We only use the 'selection' atoms for the PCA calculation
+        pca_input = combined_traj.xyz[:, selection, :].reshape(combined_traj.n_frames, -1)
+
+        # 2. Perform the actual PCA
+        # Using 2 components for 2D plotting; increase if you need more variance
+        pca_engine = skPCA(n_components=2)
+        all_projections = pca_engine.fit_transform(pca_input)
+
+        # 3. Split the combined projections back into individual trajectory results
+        # We'll store them in a list of dicts or a structured object
+        result = []
+        for i, (indices, _) in enumerate(valid_results):
+            start = i * min_n_frames
+            end = start + min_n_frames
+            
+            result.append({
+                'indices': indices, # [type, repeat, thermo]
+                'projection': all_projections[start:end],
+                'explained_variance': pca_engine.explained_variance_ratio_
+            })
+
+        return (result, uniq_sorted_types, uniq_sorted_repeats, uniq_sorted_thermos)
     #
 
     # Get trajectory data from all files. Deals with file globbing.
-    def getTrajDataFromAllFiles(self, observable_func, *, filters={}, frames=None, **obs_kwargs):
+    def getTrajDataFromAllFiles_Old(self, observable_func, *, filters={}, frames=None, **obs_kwargs):
         """ Get trajectory data from all files
         :param observable_fn: Observable function or key
         :param frames: Frames to include
@@ -249,7 +428,8 @@ class REXFNManager:
             - sim_type
         """
         
-        obsArray = self.prepareOutputArray(filters)
+        entries, (n_types, n_sims, n_replicas, n_obss, n_frames) = self.prepareOutputArraySize(filters)
+        print("n_types", n_types, "n_sims", n_sims, "n_replicas", n_replicas, "n_obss", n_obss, "n_frames", n_frames)
         exit(2)
 
         obsList = []
