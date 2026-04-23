@@ -324,7 +324,7 @@ class REXFNManager:
     #
 
     # Perform PCA on all trajectories combined and return PCA for each
-    def PCA(self, filters={}, frames=None, top="trpch/ligand.prmtop", **obs_kwargs):
+    def PCA(self, filters={}, frames=None, top="trpch/ligand.prmtop", verbose=False, **obs_kwargs):
         """ Perform PCA on all trajectories combined and return PCA for each trajectory """
         from sklearn.decomposition import PCA as skPCA        
         
@@ -336,18 +336,19 @@ class REXFNManager:
         uniq_sorted_repeats = np.unique(self.entries[:, 2].astype(int))
         uniq_sorted_thermos = np.unique(self.entries[:, 3].astype(int))
 
-        # print("n_types", n_types, "n_sims", n_sims, "n_reps", n_reps)
-        # print("Unique types:", uniq_sorted_types)
-        # print("Unique repeats:", uniq_sorted_repeats)
-        # print("Unique thermos:", uniq_sorted_thermos)
+        if verbose:
+            print("n_types", self.n_types, "n_sims", self.n_sims, "n_reps", self.n_reps)
+            print("Unique types:", uniq_sorted_types)
+            print("Unique repeats:", uniq_sorted_repeats)
+            print("Unique thermos:", uniq_sorted_thermos)
 
-        # --- PASS 1: Probe lengths and determine n_obs_dim ---
-        valid_results = []
+        # Get trajectories
+        valid_traj_infos = []
         n_frames_list = []
         n_obs_dim = 1
-
         for row in self.entries:
             s_type, seed, repeatIx, thermoIx, FN = row
+
             print("s_type", s_type, "seed", seed, "r_ix", repeatIx, "t_ix", thermoIx, "FN", FN)
 
             try:
@@ -365,47 +366,48 @@ class REXFNManager:
                 thermoIx = np.searchsorted(uniq_sorted_thermos, int(thermoIx))
                 
                 # Store data and indices in memory
-                valid_results.append(([typeIx, repeatIx, thermoIx], traj))
+                valid_traj_infos.append(([typeIx, repeatIx, thermoIx], traj))
                 print("done.")
 
             except Exception as e:
                 print(f"  [SKIP] {os.path.basename(FN)}: {e}")
 
-        if not valid_results:
+        if not valid_traj_infos:
             return None
 
-        # Truncate to minimum frame count to keep everything balanced
+        # Truncate to minimum number of frames
         min_n_frames = min(n_frames_list)
-        for ix, vr in enumerate(valid_results):
-            valid_results[ix] = (vr[0], vr[1][:min_n_frames])
+        for ix, vr in enumerate(valid_traj_infos):
+            valid_traj_infos[ix] = (vr[0], vr[1][:min_n_frames])
 
         # Combine for PCA
-        combined_traj = md.join([vr[1] for vr in valid_results])
+        combined_traj = md.join([vr[1] for vr in valid_traj_infos])
         
-        # Select CA for alignment AND analysis
+        # Superimpose to first frame of first traj
         selection = combined_traj.top.select("name CA")
-        
-        # Superimpose to first frame of first traj to remove global rotation/translation
         combined_traj.superpose(combined_traj, frame=0, atom_indices=selection)
 
-        # Reshape for sklearn: (n_frames, n_atoms * 3)
-        # We only use the 'selection' atoms for the PCA calculation
+        # Reshape for sklearn: (n_frames of combined_traj, n_atoms * 3 = 60 for trpch)
         pca_input = combined_traj.xyz[:, selection, :].reshape(combined_traj.n_frames, -1)
+        
+        if verbose:
+            print("pca_input type and shape", type(pca_input), pca_input.shape)
 
-        # 2. Perform the actual PCA
-        # Using 2 components for 2D plotting; increase if you need more variance
+        # Perform PCA
         pca_engine = skPCA(n_components=2)
-        all_projections = pca_engine.fit_transform(pca_input)
+        all_projections = pca_engine.fit_transform(pca_input) # (n_samples, n_components)
 
-        # 3. Split the combined projections back into individual trajectory results
-        # We'll store them in a list of dicts or a structured object
+        if verbose:
+            print("all_projections type and shape", type(all_projections), all_projections.shape)
+
+        # Split the combined projections back into individual trajectory results
         result = []
-        for i, (indices, _) in enumerate(valid_results):
-            start = i * min_n_frames
+        for tIx, (traj_info, _) in enumerate(valid_traj_infos):
+            start = tIx * min_n_frames
             end = start + min_n_frames
             
             result.append({
-                'indices': indices, # [type, repeat, thermo]
+                'traj_info': traj_info, # [type, repeat, thermo]
                 'projection': all_projections[start:end],
                 'explained_variance': pca_engine.explained_variance_ratio_
             })

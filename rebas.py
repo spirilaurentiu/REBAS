@@ -104,6 +104,83 @@ def plotChecks1D(df, col, save_path=None):
         plt.show()
 #
 
+
+# Generic plotting function for 2D scatter plots
+def plotScatter(Y=None,
+           X=None,
+           Yerr=None,
+           Yerr_every=1,
+           title="title",
+           xlabel="x",
+           ylabel="y",
+           ylim=None,
+           labels=None,
+           legend=True,
+           colors=None,
+           save_path=None,
+           linestyle="None", marker='.', alpha=0.7):
+    """ Plot values of two columns against each other in a line plot.
+    Arguments:
+        X : array-like for x-axis
+        Y : array-like for y-axis
+    """
+
+    # Y should be a list of arrays
+    if not isinstance(Y, list):
+        Y = list(Y)
+    for ix, Y_series in enumerate(Y):
+        Y[ix] = np.asarray(Y_series, dtype=float)
+
+    # Yerr should be a list of arrays
+    if Yerr is not None:
+        if not isinstance(Yerr, list):
+            Yerr = list(Yerr)
+        for ix, Yerr_series in enumerate(Yerr):
+            Yerr[ix] = np.asarray(Yerr_series, dtype=float)
+
+    # If X is None, create default X as range for each Y series
+    if X is None:
+        X = []
+        for ix, Y_series in enumerate(Y):
+            X.append(np.arange(len(Y_series)))
+
+    # Labels should be a list of strings
+    if not isinstance(labels, list):
+        labels = [None] * len(Y)
+    
+    # Plot generics
+    plt.figure()
+    plt.title(title)
+    plt.xlabel(xlabel)
+    plt.ylabel(ylabel)
+
+    # Plt plot or errorbar
+    for ix, Y_series in enumerate(Y):
+        if Yerr is None:
+            plt.scatter(X[ix], Y_series, label=labels[ix],
+                    color=colors[ix] if colors else None)
+        else:
+            plt.errorbar(X[ix], Y_series, yerr=Yerr[ix], errorevery=Yerr_every,
+                         label=labels[ix], linestyle=linestyle, marker=marker, alpha=alpha,
+                         color=colors[ix] if colors else None)
+    
+    # Plot finishing touches
+    if legend == True:
+        plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+
+    if ylim is not None:
+        plt.ylim(ylim)
+
+    # Save or show
+    if save_path:
+        plt.savefig(save_path)
+    else:
+        pass
+        #plt.show()
+#
+
 # Generic plotting function for 1D line plots
 def plot1D(Y,
            X=None,
@@ -1152,7 +1229,7 @@ def main(args):
 
                 #print("FNManager.entries", FNManager.entries)
                 (result, types, repeats, thermos) = \
-                FNManager.PCA(filters=filters, frames=frames)
+                FNManager.PCA(filters=filters, frames=frames, verbose=True)
 
                 print("PCA result", result)
 
@@ -1162,12 +1239,13 @@ def main(args):
 
                 # Iterate through the processed trajectories
                 for entry in result:
-                    indices = entry['indices']
+                    traj_info = entry['traj_info']
                     projection = entry['projection']
+                    print(f"Trajectory info: {traj_info}, projection shape: {projection.shape}")
                     
                     # Use the 'type' index to select a consistent color for the group
-                    type_idx = indices[0]
-                    label = f"Type {types[type_idx]} (Rep {repeats[indices[1]]})"
+                    type_idx = traj_info[0]
+                    label = f"Type {types[type_idx]} (Rep {repeats[traj_info[1]]})"
                     
                     # Plot PC1 vs PC2
                     plt.scatter(
@@ -1189,7 +1267,7 @@ def main(args):
                 # you might want to handle unique labels only.
                 plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
                 plt.tight_layout()
-                plt.savefig("pca_projection.png", dpi=300)
+                plt.savefig("traj_pca.png", dpi=300)
 
 
                 PRINT__, PLOT__ = True, True
