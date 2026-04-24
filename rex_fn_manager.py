@@ -367,7 +367,7 @@ class REXFNManager:
                 
                 # Store data and indices in memory
                 valid_traj_infos.append(([typeIx, repeatIx, thermoIx], traj))
-                print("done.")
+                print(f"{traj.n_frames} frames. Done.")
 
             except Exception as e:
                 print(f"  [SKIP] {os.path.basename(FN)}: {e}")
@@ -407,7 +407,7 @@ class REXFNManager:
             end = start + min_n_frames
             
             result.append({
-                'traj_info': traj_info, # [type, repeat, thermo]
+                'traj_info': traj_info, # [typeIx, repeat, thermo]
                 'projection': all_projections[start:end],
                 'explained_variance': pca_engine.explained_variance_ratio_
             })
