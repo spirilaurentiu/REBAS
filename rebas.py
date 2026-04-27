@@ -13,7 +13,7 @@ import scipy.stats
 from scipy.signal import find_peaks
 
 import matplotlib
-matplotlib.use('Agg')
+#matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 from mystats import LS_Statistics
@@ -135,13 +135,15 @@ def plotScatter(
     if not isinstance(X, list):
         X = list(X)
     for ix, X_series in enumerate(X):
-        X[ix] = np.asarray(X_series, dtype=float)
+        if not isinstance(X_series, np.ndarray):
+            X[ix] = np.asarray(X_series, dtype=float)
 
     # Y should be a list of arrays
     if not isinstance(Y, list):
         Y = list(Y)
     for ix, Y_series in enumerate(Y):
-        Y[ix] = np.asarray(Y_series, dtype=float)
+        if not isinstance(Y_series, np.ndarray):
+            Y[ix] = np.asarray(Y_series, dtype=float)
 
     # Labels should be a list of strings
     if not isinstance(labels, list):
@@ -150,7 +152,7 @@ def plotScatter(
         raise ValueError(f"Length of labels must match number of Y series. Got {len(labels)} and {len(Y)}.")
 
     if not isinstance(colors, list):
-        colors = list(colors)
+        colors = [None] * len(Y)
     elif len(colors) != len(Y):
         raise ValueError(f"Length of colors must match number of Y series. Got {len(colors)} and {len(Y)}.")
     #endregion
@@ -1244,7 +1246,7 @@ def main(args):
                 all_thermoIxs = [thermos[entry['traj_info'][2]] for entry in result]
                 # print("PCA traj_infos", traj_infos)
                 # print("PCA explained_variances", explained_variances)
-                # print("PCA all_projections shapes", [proj.shape for proj in all_projections])
+                print("PCA all_projections_PC1 shapes", [proj.shape for proj in all_projections_PC1])
                 # exit(2)
 
                 minX = np.nanmin([proj[:, 0].min() for proj in all_projections])
@@ -1252,7 +1254,26 @@ def main(args):
                 minY = np.nanmin([proj[:, 1].min() for proj in all_projections])
                 maxY = np.nanmax([proj[:, 1].max() for proj in all_projections])
                 print(f"PCA projection ranges: PC1 [{minX:.3f}, {maxX:.3f}], PC2 [{minY:.3f}, {maxY:.3f}]")
-                
+
+                # Get PCA projection index
+                def get_projIx_by_type_repeat_thermo(type_val, repeatIx, thermoIx):
+                    """ Get the index of the PCA projection for a specific
+                        type, repeat, and thermo combination. """
+                    all_proj_ix = None
+                    for ix, entry in enumerate(result):
+                        curr_typeIx, curr_repeat, curr_thermoIx = entry['traj_info']
+                        curr_type = types[curr_typeIx]
+                        if curr_type == type_val and curr_repeat == repeatIx and curr_thermoIx== thermoIx:
+                            all_proj_ix = ix
+                            break
+                    return all_proj_ix
+                #
+
+                proj_T300_Type1_Ix = get_projIx_by_type_repeat_thermo(type_val=1, repeatIx=0, thermoIx=0)
+                proj_T300_Type3_Ix = get_projIx_by_type_repeat_thermo(type_val=3, repeatIx=0, thermoIx=0)
+                proj_T300_Type1 = all_projections[proj_T300_Type1_Ix]
+                proj_T300_Type3 = all_projections[proj_T300_Type3_Ix]
+
                 # region Iterate through the processed trajectories
                 # for entry in result:
                 #     traj_info = entry['traj_info']
@@ -1282,6 +1303,29 @@ def main(args):
                 #     )
                 # endregion
 
+                PRINT__, PLOT__ = True, True
+                if PRINT__:
+                    print(f"Explained variance by PC1 and PC2 for trajectory with Type 1, Repeat 0, Thermo 0: {explained_variances[proj_T300_Type1_Ix]}")
+                    print(f"Explained variance by PC1 and PC2 for trajectory with Type 3, Repeat 0, Thermo 0: {explained_variances[proj_T300_Type3_Ix]}")
+                if PLOT__:
+                    plotFN = None
+                    if args.useAgg:
+                        plotFN = f"traj_pca.png"
+                    stride =7
+                    plotScatter(
+                        X=[all_projections_PC1[proj_T300_Type1_Ix][::stride], all_projections_PC1[proj_T300_Type3_Ix][::stride]],
+                        Y=[all_projections_PC2[proj_T300_Type1_Ix][::stride], all_projections_PC2[proj_T300_Type3_Ix][::stride]],
+                        title="PCA Projection of Two Trajectories",
+                        xlabel="PC1",
+                        ylabel="PC2",
+                        xlim=(minX, maxX),
+                        ylim=(minY, maxY),
+                        labels=[f"Seed {all_repeats[proj_T300_Type1_Ix]} Type {all_types[proj_T300_Type1_Ix]} Thermo {all_thermoIxs[proj_T300_Type1_Ix]}", f"Seed {all_repeats[proj_T300_Type3_Ix]} Type {all_types[proj_T300_Type3_Ix]} Thermo {all_thermoIxs[proj_T300_Type3_Ix]}"],
+                        legend=True,
+                        colors=[colorByType(all_types[proj_T300_Type1_Ix]), colorByType(all_types[proj_T300_Type3_Ix])],
+                        save_path=f"traj_pca_example_point.png" if args.useAgg else None,
+                        s=0.5,
+                    )
 
                 PRINT__, PLOT__ = True, True
                 if PRINT__:
@@ -1290,57 +1334,32 @@ def main(args):
                     plotFN = None
                     if args.useAgg:
                         plotFN = f"traj_pca.png"
+                    stride = 10
                     plotScatter(
-                        X=[all_projections_PC1[0], all_projections_PC1[26]],
-                        Y=[all_projections_PC2[0], all_projections_PC2[26]],
-                        title="PCA Projection of Two Trajectories",
+                        X=[proj[::stride] for proj in all_projections_PC1],
+                        Y=[proj[::stride] for proj in all_projections_PC2],
+                        title=f"All PCA Projections at stride {stride}",
                         xlabel="PC1",
                         ylabel="PC2",
                         xlim=(minX, maxX),
                         ylim=(minY, maxY),
-                        labels=[f"Seed {all_repeats[0]} Type {all_types[0]} Thermo {all_thermoIxs[0]}", f"Seed {all_repeats[26]} Type {all_types[26]} Thermo {all_thermoIxs[26]}"],
+                        labels=None,
                         legend=True,
-                        colors=[colorByType(all_types[0]), colorByType(all_types[26])],
-                        save_path=f"traj_pca_example_point.png" if args.useAgg else None,
+                        colors=[colorByType(type_val) for type_val in all_types],
+                        save_path=plotFN,
                         s=0.5,
                     )
-                    # plotScatter(
-                    #     X=[all_projections_PC1[0], all_projections_PC1[4]],
-                    #     Y=[all_projections_PC2[0], all_projections_PC2[4]],
-                    #     title="PCA Projection of Two Trajectories",
-                    #     xlabel="PC1",
-                    #     ylabel="PC2",
-                    #     xlim=(minX, maxX),
-                    #     ylim=(minY, maxY),
-                    #     labels=[f"Seed {all_repeats[0]} Type {all_types[0]} Thermo {all_thermoIxs[0]}", f"Seed {all_repeats[4]} Type {all_types[4]} Thermo {all_thermoIxs[4]}"],
-                    #     legend=True,
-                    #     colors=[colorByType(all_types[0]), colorByType(all_types[4])],
-                    #     save_path=f"traj_pca_example_point.png" if args.useAgg else None,
-                    #     s=0.5,
-                    # )
-                    # plotScatter(
-                    #     X=all_projections_PC1,
-                    #     Y=all_projections_PC2,
-                    #     title="PCA Projection of Trajectories",
-                    #     xlabel="PC1",
-                    #     ylabel="PC2",
-                    #     xlim=(minX, maxX),
-                    #     ylim=(minY, maxY),
-                    #     labels=[f"Seed {all_repeats[ix]} Type {all_types[ix]} Thermo {all_thermoIxs[ix]}" for ix in range(len(result))],
-                    #     legend=True,
-                    #     colors=[colorByType(all_types[ix]) for ix in range(len(result))],
-                    #     save_path=plotFN,
-                    #     s=0.5,
-                    # )
+
+                MSM = FNManager.MSM(result, lag=1,  n_states=5, verbose=True)
+                print("MSM assignments", MSM["assignments"])
+                print("MSM transition matrix", MSM["transition_matrix"])
+                print("MSM stationary distribution", MSM["stationary_distribution"])
+                print("MSM implied timescales", MSM["implied_timescales"])
+                print("MSM cluster centers", MSM["cluster_centers"])
 
                 if not args.useAgg:
                     plt.show()
                 plt.close()
-
-
-
-
-
 
 
     #region Restart: write restart files into self.dir/restDir/restDir.<seed>

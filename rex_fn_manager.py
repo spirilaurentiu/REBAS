@@ -323,12 +323,14 @@ class REXFNManager:
         return (result, uniq_sorted_types, uniq_sorted_repeats, uniq_sorted_thermos)
     #
 
-    # Perform PCA on all trajectories combined and return PCA for each
+    # Perform PCA on all trajectories combined and return PCA for each trajectory
     def PCA(self, filters={}, frames=None, top="trpch/ligand.prmtop", verbose=False, **obs_kwargs):
         """ Perform PCA on all trajectories combined and return PCA for each trajectory """
-        from sklearn.decomposition import PCA as skPCA        
-        
-        # 1. Get metadata and dimensions from filenames
+        from sklearn.decomposition import IncrementalPCA
+
+        ipca = IncrementalPCA(n_components=2, batch_size=5000)
+
+        # 1. Get metadata
         if self.entries is None:
             self.entries, (self.n_types, self.n_sims, self.n_reps) = self.prepareOutputArraySize(filters)
 
@@ -336,84 +338,195 @@ class REXFNManager:
         uniq_sorted_repeats = np.unique(self.entries[:, 2].astype(int))
         uniq_sorted_thermos = np.unique(self.entries[:, 3].astype(int))
 
-        if verbose:
-            print("n_types", self.n_types, "n_sims", self.n_sims, "n_reps", self.n_reps)
-            print("Unique types:", uniq_sorted_types)
-            print("Unique repeats:", uniq_sorted_repeats)
-            print("Unique thermos:", uniq_sorted_thermos)
-
-        # Get trajectories
-        valid_traj_infos = []
+        # Load trajectories
+        valid_trajItraj = []
         n_frames_list = []
-        n_obs_dim = 1
+
         for row in self.entries:
             s_type, seed, repeatIx, thermoIx, FN = row
 
-            print("s_type", s_type, "seed", seed, "r_ix", repeatIx, "t_ix", thermoIx, "FN", FN)
-
             try:
                 print(f"Reading {FN} ...", end=" ", flush=True)
-                traj = md.load_dcd(FN, top=top)
+                traj = md.load_dcd(FN, top=top, stride=1)
 
-                # Capture dimensions
+                # Convert to float32 to save memory
+                traj.xyz = traj.xyz.astype('float32')
+
                 n_frames_list.append(traj.n_frames)
-                if traj.n_frames > 1:
-                    n_obs_dim = traj.n_atoms
 
-                # Map to indices immediately
-                typeIx = np.searchsorted(uniq_sorted_types, int(s_type)) # is NOT the same as type
+                typeIx = np.searchsorted(uniq_sorted_types, int(s_type))
                 repeatIx = np.searchsorted(uniq_sorted_repeats, int(repeatIx))
                 thermoIx = np.searchsorted(uniq_sorted_thermos, int(thermoIx))
-                
-                # Store data and indices in memory
-                valid_traj_infos.append(([typeIx, repeatIx, thermoIx], traj))
-                print(f"{traj.n_frames} frames. Done.")
+
+                valid_trajItraj.append(([typeIx, repeatIx, thermoIx], traj))
+                print(f"{traj.n_frames} frames. Done.", flush=True)
 
             except Exception as e:
                 print(f"  [SKIP] {os.path.basename(FN)}: {e}")
 
-        if not valid_traj_infos:
+        if not valid_trajItraj:
             return None
 
-        # Truncate to minimum number of frames
+        # Truncate to minimum frames
         min_n_frames = min(n_frames_list)
-        for ix, vr in enumerate(valid_traj_infos):
-            valid_traj_infos[ix] = (vr[0], vr[1][:min_n_frames])
+        print(f"Truncating trajectories to {min_n_frames} frames ...", flush=True)
+        for ix, vr in enumerate(valid_trajItraj):
+            valid_trajItraj[ix] = (vr[0], vr[1][:min_n_frames])
+        print("done.", flush=True)
 
-        # Combine for PCA
-        combined_traj = md.join([vr[1] for vr in valid_traj_infos])
-        
-        # Superimpose to first frame of first traj
-        selection = combined_traj.top.select("name CA")
-        combined_traj.superpose(combined_traj, frame=0, atom_indices=selection)
+        # Use CA selection from the reference trajectory
+        ref_traj = valid_trajItraj[0][1]
+        selection = ref_traj.top.select("name CA")
+        ref_frame = ref_traj[0]
 
-        # Reshape for sklearn: (n_frames of combined_traj, n_atoms * 3 = 60 for trpch)
-        pca_input = combined_traj.xyz[:, selection, :].reshape(combined_traj.n_frames, -1)
-        
-        if verbose:
-            print("pca_input type and shape", type(pca_input), pca_input.shape)
+        # Superpose all trajectories to the reference
+        print("Superimposing trajectories ...", flush=True)
+        for traj_info, traj in valid_trajItraj:
+            traj.superpose(ref_frame, atom_indices=selection)
+        print("done.", flush=True)
 
-        # Perform PCA
-        pca_engine = skPCA(n_components=2)
-        all_projections = pca_engine.fit_transform(pca_input) # (n_samples, n_components)
+        # First pass: partial_fit
+        print("Partial Fitting PCA model ...", flush=True)
+        for traj_info, traj in valid_trajItraj:
+            X = traj.xyz[:, selection, :].reshape(traj.n_frames, -1)
+            ipca.partial_fit(X)
+        print("done.", flush=True)
 
-        if verbose:
-            print("all_projections type and shape", type(all_projections), all_projections.shape)
-
-        # Split the combined projections back into individual trajectory results
+        # Second pass: transform
+        print("Transforming trajectories ...", flush=True)
         result = []
-        for tIx, (traj_info, _) in enumerate(valid_traj_infos):
-            start = tIx * min_n_frames
-            end = start + min_n_frames
-            
+        for traj_info, traj in valid_trajItraj:
+            X = traj.xyz[:, selection, :].reshape(traj.n_frames, -1)
+            proj = ipca.transform(X)
+
             result.append({
-                'traj_info': traj_info, # [typeIx, repeat, thermo]
-                'projection': all_projections[start:end],
-                'explained_variance': pca_engine.explained_variance_ratio_
+                "traj_info": traj_info,
+                "projection": proj,
+                "explained_variance": ipca.explained_variance_ratio_
             })
+        print("done.", flush=True)
 
         return (result, uniq_sorted_types, uniq_sorted_repeats, uniq_sorted_thermos)
     #
+
+    # Build a Markov State Model using PCA
+    def MSM(self, pca_result, lag=50, n_states=100, verbose=False):
+        """
+        Build a Markov State Model (MSM) from PCA projections.
+
+        Parameters
+        ----------
+        pca_result : list of dicts
+            Output from self.PCA(), i.e. a list where each element contains:
+                - "traj_info": metadata
+                - "projection": (n_frames, n_components) PCA coordinates
+        lag : int
+            Lag time (in frames) for MSM transition counting.
+        n_states : int
+            Number of discrete microstates for clustering.
+
+        Returns
+        -------
+        msm : dict
+            {
+                "assignments": list of arrays of state indices,
+                "transition_matrix": T,
+                "stationary_distribution": pi,
+                "implied_timescales": its,
+                "cluster_centers": kmeans.cluster_centers_
+            }
+        """
+
+        from sklearn.cluster import MiniBatchKMeans
+
+        # ------------------------------------------------------------
+        # 1. Extract PCA projections
+        # ------------------------------------------------------------
+        if verbose:
+            print("Extracting PCA projections...")
+
+        traj_pca_projections = [entry["projection"] for entry in pca_result]  # list of (n_frames, n_components)
+
+        if verbose:
+            print(f"PCA projections shapes:", [proj.shape for proj in traj_pca_projections])
+
+        X_concat = np.vstack(traj_pca_projections)
+
+        if verbose:
+            print(f"Concatenated PCA shape: {X_concat.shape}")
+            print(f"Total frames: {X_concat.shape[0]}, PCA dim: {X_concat.shape[1]}")
+
+        # ------------------------------------------------------------
+        # 2. Cluster PCA space into microstates
+        # ------------------------------------------------------------
+        if verbose:
+            print(f"Clustering into {n_states} states...")
+
+        kmeans = MiniBatchKMeans(
+            n_clusters=n_states,
+            batch_size=10000,
+            n_init=10
+        )
+        kmeans.fit(X_concat)
+
+        # Assign each trajectory separately
+        assignments = [kmeans.predict(proj) for proj in traj_pca_projections]
+
+        # ------------------------------------------------------------
+        # 3. Build transition matrix
+        # ------------------------------------------------------------
+        if verbose:
+            print(f"Building transition matrix at lag = {lag}...")
+
+        T = np.zeros((n_states, n_states), dtype=float)
+
+        for assign in assignments:
+            for i in range(len(assign) - lag):
+                a = assign[i]
+                b = assign[i + lag]
+                T[a, b] += 1
+
+        # Normalize rows
+        row_sums = T.sum(axis=1, keepdims=True)
+        row_sums[row_sums == 0] = 1.0  # avoid division by zero
+        T = T / row_sums
+
+        # ------------------------------------------------------------
+        # 4. Stationary distribution
+        # ------------------------------------------------------------
+        if verbose:
+            print("Computing stationary distribution...")
+
+        w, v = np.linalg.eig(T.T)
+        idx = np.argmax(np.real(w))
+        pi = np.real(v[:, idx])
+        pi = pi / pi.sum()
+
+        # ------------------------------------------------------------
+        # 5. Implied timescales
+        # ------------------------------------------------------------
+        if verbose:
+            print("Computing implied timescales...")
+
+        eigvals = np.linalg.eigvals(T)
+        eigvals = np.sort(np.abs(eigvals))[::-1]  # descending
+        its = -lag / np.log(eigvals[1:])          # skip eigenvalue 1
+
+        # ------------------------------------------------------------
+        # 6. Return MSM object
+        # ------------------------------------------------------------
+        msm = {
+            "assignments": assignments,
+            "transition_matrix": T,
+            "stationary_distribution": pi,
+            "implied_timescales": its,
+            "cluster_centers": kmeans.cluster_centers_
+        }
+
+        if verbose:
+            print("MSM construction complete.")
+
+        return msm
 
     # Get trajectory data from all files. Deals with file globbing.
     def getTrajDataFromAllFiles_Old(self, observable_func, *, filters={}, frames=None, **obs_kwargs):
