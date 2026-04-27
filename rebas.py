@@ -13,7 +13,7 @@ import scipy.stats
 from scipy.signal import find_peaks
 
 import matplotlib
-#matplotlib.use('Agg')
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 from mystats import LS_Statistics
@@ -985,7 +985,7 @@ def main(args):
             frames = slice(GLOBAL_BURNIN, GLOBAL_END)   # or slice(GLOBAL_BURNIN, None)
 
             FNManager = REXFNManager(args.dir, args.inFNRoots, args.cols, topology=args.topology)
-            FNManager.prepareOutputArraySize(filters=filters)
+            FNManager.prepareTrajArraySize(filters=filters)
 
             #region Extractor functions for trajectory observables
             

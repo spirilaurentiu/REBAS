@@ -178,7 +178,7 @@ class REXFNManager:
     #
 
     # Prepare output array read from all filenames
-    def prepareOutputArraySize(self, filters={}):
+    def prepareTrajArraySize(self, filters={}):
         """ Prepare output array metadata and calculate dimensions """
         entries = []
 
@@ -252,7 +252,7 @@ class REXFNManager:
         
         # 1. Get metadata and dimensions from filenames
         if self.entries is None:
-            self.entries, (self.n_types, self.n_sims, self.n_reps) = self.prepareOutputArraySize(filters)
+            self.entries, (self.n_types, self.n_sims, self.n_reps) = self.prepareTrajArraySize(filters)
         
         uniq_sorted_types = np.unique(self.entries[:, 0].astype(int))
         uniq_sorted_repeats = np.unique(self.entries[:, 2].astype(int))
@@ -332,7 +332,7 @@ class REXFNManager:
 
         # 1. Get metadata
         if self.entries is None:
-            self.entries, (self.n_types, self.n_sims, self.n_reps) = self.prepareOutputArraySize(filters)
+            self.entries, (self.n_types, self.n_sims, self.n_reps) = self.prepareTrajArraySize(filters)
 
         uniq_sorted_types = np.unique(self.entries[:, 0].astype(int))
         uniq_sorted_repeats = np.unique(self.entries[:, 2].astype(int))
@@ -462,14 +462,16 @@ class REXFNManager:
         if verbose:
             print(f"Clustering into {n_states} states...")
 
-        kmeans = MiniBatchKMeans(
+        kmeans = MiniBatchKMeans( 
             n_clusters=n_states,
             batch_size=10000,
             n_init=10
         )
+
+        # Find cluster_centers_ (and labels_ for each point in X_concat)
         kmeans.fit(X_concat)
 
-        # Assign each trajectory separately
+        # Recover the closest cluster for every point in each projection in original order
         assignments = [kmeans.predict(proj) for proj in traj_pca_projections]
 
         # ------------------------------------------------------------
@@ -479,12 +481,11 @@ class REXFNManager:
             print(f"Building transition matrix at lag = {lag}...")
 
         T = np.zeros((n_states, n_states), dtype=float)
-
-        for assign in assignments:
-            for i in range(len(assign) - lag):
-                a = assign[i]
-                b = assign[i + lag]
-                T[a, b] += 1
+        for ass in assignments:
+            for labelIx in range(len(ass) - lag):
+                label_A = ass[labelIx]
+                label_B = ass[labelIx + lag]
+                T[label_A, label_B] += 1
 
         # Normalize rows
         row_sums = T.sum(axis=1, keepdims=True)
@@ -497,9 +498,10 @@ class REXFNManager:
         if verbose:
             print("Computing stationary distribution...")
 
-        w, v = np.linalg.eig(T.T)
-        idx = np.argmax(np.real(w))
-        pi = np.real(v[:, idx])
+        # Get Eigen values w__ and Eigen vectors V__ of T
+        w__, V__ = np.linalg.eig(T.T)
+        idx = np.argmax(np.real(w__))
+        pi = np.real(V__[:, idx])
         pi = pi / pi.sum()
 
         # ------------------------------------------------------------
@@ -515,7 +517,7 @@ class REXFNManager:
         # ------------------------------------------------------------
         # 6. Return MSM object
         # ------------------------------------------------------------
-        msm = {
+        MSM_result = {
             "assignments": assignments,
             "transition_matrix": T,
             "stationary_distribution": pi,
@@ -526,7 +528,8 @@ class REXFNManager:
         if verbose:
             print("MSM construction complete.")
 
-        return msm
+        return MSM_result
+    #
 
     # Get trajectory data from all files. Deals with file globbing.
     def getTrajDataFromAllFiles_Old(self, observable_func, *, filters={}, frames=None, **obs_kwargs):
@@ -543,7 +546,7 @@ class REXFNManager:
             - sim_type
         """
         
-        entries, (n_types, n_sims, n_replicas, n_obss, n_frames) = self.prepareOutputArraySize(filters)
+        entries, (n_types, n_sims, n_replicas, n_obss, n_frames) = self.prepareTrajArraySize(filters)
         print("n_types", n_types, "n_sims", n_sims, "n_replicas", n_replicas, "n_obss", n_obss, "n_frames", n_frames)
         exit(2)
 
