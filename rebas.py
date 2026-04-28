@@ -1351,11 +1351,19 @@ def main(args):
                     )
 
                 MSM = FNManager.MSM(result, lag=1,  n_states=5, verbose=True)
-                print("MSM assignments", MSM["assignments"])
-                print("MSM transition matrix", MSM["transition_matrix"])
-                print("MSM stationary distribution", MSM["stationary_distribution"])
-                print("MSM implied timescales", MSM["implied_timescales"])
-                print("MSM cluster centers", MSM["cluster_centers"])
+
+                #all_repeats all_thermoIxs 
+                
+                
+                for tyIx, typeVal in enumerate(all_types):
+                    pass 
+                    #print(f"tyIx, type", tyIx, typeVal)
+                    #print()
+                    # print("MSM assignments", MSM["assignments"])
+                    # print("MSM transition matrix", MSM["transition_matrix"])
+                    # print("MSM stationary distribution", MSM["stationary_distribution"])
+                    # print("MSM implied timescales", MSM["implied_timescales"])
+                    # print("MSM cluster centers", MSM["cluster_centers"])
 
                 if not args.useAgg:
                     plt.show()

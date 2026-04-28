@@ -446,6 +446,7 @@ class REXFNManager:
             print("Extracting PCA projections...")
 
         traj_pca_projections = [entry["projection"] for entry in pca_result]  # list of (n_frames, n_components)
+        traj_infos = [entry["traj_info"] for entry in pca_result]
 
         if verbose:
             print(f"PCA projections shapes:", [proj.shape for proj in traj_pca_projections])
@@ -480,50 +481,67 @@ class REXFNManager:
         if verbose:
             print(f"Building transition matrix at lag = {lag}...")
 
-        T = np.zeros((n_states, n_states), dtype=float)
-        for ass in assignments:
-            for labelIx in range(len(ass) - lag):
-                label_A = ass[labelIx]
-                label_B = ass[labelIx + lag]
-                T[label_A, label_B] += 1
+        T_type1 = []
+        T_type2 = []
 
-        # Normalize rows
-        row_sums = T.sum(axis=1, keepdims=True)
-        row_sums[row_sums == 0] = 1.0  # avoid division by zero
-        T = T / row_sums
+        # Compute transition matrices and marginals by type
+        for ix, trajInfo in enumerate(traj_infos):
 
-        # ------------------------------------------------------------
-        # 4. Stationary distribution
-        # ------------------------------------------------------------
-        if verbose:
-            print("Computing stationary distribution...")
+            typeIx, repeatIx, thermoIx = trajInfo
 
-        # Get Eigen values w__ and Eigen vectors V__ of T
-        w__, V__ = np.linalg.eig(T.T)
-        idx = np.argmax(np.real(w__))
-        pi = np.real(V__[:, idx])
-        pi = pi / pi.sum()
+            if verbose:
+                print(f"Trajectory {ix}: Type {typeIx}, Repeat {repeatIx}, Thermo {thermoIx}.")
 
-        # ------------------------------------------------------------
-        # 5. Implied timescales
-        # ------------------------------------------------------------
-        if verbose:
-            print("Computing implied timescales...")
+            #region ------------------------------------------------------
+            # 1. Compute transition matrix
+            # ------------------------------------------------------------
+            T = np.zeros((n_states, n_states), dtype=float)
+            for ass in assignments:
+                for labelIx in range(len(ass) - lag):
+                    label_A = ass[labelIx]
+                    label_B = ass[labelIx + lag]
+                    T[label_A, label_B] += 1
 
-        eigvals = np.linalg.eigvals(T)
-        eigvals = np.sort(np.abs(eigvals))[::-1]  # descending
-        its = -lag / np.log(eigvals[1:])          # skip eigenvalue 1
+            # Normalize rows
+            row_sums = T.sum(axis=1, keepdims=True)
+            row_sums[row_sums == 0] = 1.0  # avoid division by zero
+            T = T / row_sums
+            #endregion ---------------------------------------------------
 
-        # ------------------------------------------------------------
-        # 6. Return MSM object
-        # ------------------------------------------------------------
-        MSM_result = {
-            "assignments": assignments,
-            "transition_matrix": T,
-            "stationary_distribution": pi,
-            "implied_timescales": its,
-            "cluster_centers": kmeans.cluster_centers_
-        }
+            #region ------------------------------------------------------
+            # 4. Stationary distribution
+            # ------------------------------------------------------------
+            if verbose:
+                print("Computing stationary distribution...")
+
+            # Get Eigen values w__ and Eigen vectors V__ of T
+            w__, V__ = np.linalg.eig(T.T)
+            idx = np.argmax(np.real(w__))
+            pi = np.real(V__[:, idx])
+            pi = pi / pi.sum()
+            #endregion ---------------------------------------------------
+
+            #region ------------------------------------------------------
+            # 5. Implied timescales
+            # ------------------------------------------------------------
+            if verbose:
+                print("Computing implied timescales...")
+
+            eigvals = np.linalg.eigvals(T)
+            eigvals = np.sort(np.abs(eigvals))[::-1]  # descending
+            its = -lag / np.log(eigvals[1:])          # skip eigenvalue 1
+            #endregion ---------------------------------------------------
+
+            # ------------------------------------------------------------
+            # 6. Return MSM object
+            # ------------------------------------------------------------
+            MSM_result = {
+                "assignments": assignments,
+                "transition_matrix": T,
+                "stationary_distribution": pi,
+                "implied_timescales": its,
+                "cluster_centers": kmeans.cluster_centers_
+            }
 
         if verbose:
             print("MSM construction complete.")
