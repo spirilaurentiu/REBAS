@@ -481,8 +481,14 @@ class REXFNManager:
         if verbose:
             print(f"Building transition matrix at lag = {lag}...")
 
-        T_type1 = []
-        T_type2 = []
+        T_typeIx_0 = []
+        T_typeIx_1 = []
+        pi_typeIx_0 = []
+        pi_typeIx_1 = []
+        its_typeIx_0 = []
+        its_typeIx_1 = []
+        MSM_results_0 = []
+        MSM_results_1 = []
 
         # Compute transition matrices and marginals by type
         for ix, trajInfo in enumerate(traj_infos):
@@ -495,41 +501,56 @@ class REXFNManager:
             #region ------------------------------------------------------
             # 1. Compute transition matrix
             # ------------------------------------------------------------
-            T = np.zeros((n_states, n_states), dtype=float)
+            T_current = np.zeros((n_states, n_states), dtype=float)
             for ass in assignments:
                 for labelIx in range(len(ass) - lag):
                     label_A = ass[labelIx]
                     label_B = ass[labelIx + lag]
-                    T[label_A, label_B] += 1
+                    T_current[label_A, label_B] += 1
 
             # Normalize rows
-            row_sums = T.sum(axis=1, keepdims=True)
+            row_sums = T_current.sum(axis=1, keepdims=True)
             row_sums[row_sums == 0] = 1.0  # avoid division by zero
-            T = T / row_sums
+            T_current = T_current / row_sums
+
+            if typeIx == 0:
+                T_typeIx_0.append(T_current)
+            elif typeIx == 1:
+                T_typeIx_1.append(T_current)
             #endregion ---------------------------------------------------
 
-            #region ------------------------------------------------------
-            # 4. Stationary distribution
             # ------------------------------------------------------------
+            # 4. Stationary distribution
+            # region -----------------------------------------------------
             if verbose:
                 print("Computing stationary distribution...")
 
             # Get Eigen values w__ and Eigen vectors V__ of T
-            w__, V__ = np.linalg.eig(T.T)
+            w__, V__ = np.linalg.eig(T_current.T)
             idx = np.argmax(np.real(w__))
-            pi = np.real(V__[:, idx])
-            pi = pi / pi.sum()
+            pi_current = np.real(V__[:, idx])
+            pi_current = pi_current / pi_current.sum()
+
+            if typeIx == 0:
+                pi_typeIx_0.append(pi_current)
+            elif typeIx == 1:
+                pi_typeIx_1.append(pi_current)
             #endregion ---------------------------------------------------
 
-            #region ------------------------------------------------------
+            #-------------------------------------------------------------
             # 5. Implied timescales
-            # ------------------------------------------------------------
+            #region ------------------------------------------------------
             if verbose:
                 print("Computing implied timescales...")
 
-            eigvals = np.linalg.eigvals(T)
+            eigvals = np.linalg.eigvals(T_current)
             eigvals = np.sort(np.abs(eigvals))[::-1]  # descending
             its = -lag / np.log(eigvals[1:])          # skip eigenvalue 1
+
+            if typeIx == 0:
+                its_typeIx_0.append(its)
+            elif typeIx == 1:
+                its_typeIx_1.append(its)
             #endregion ---------------------------------------------------
 
             # ------------------------------------------------------------
@@ -537,16 +558,20 @@ class REXFNManager:
             # ------------------------------------------------------------
             MSM_result = {
                 "assignments": assignments,
-                "transition_matrix": T,
-                "stationary_distribution": pi,
+                "transition_matrix": T_current,
+                "stationary_distribution": pi_current,
                 "implied_timescales": its,
                 "cluster_centers": kmeans.cluster_centers_
             }
+            if typeIx == 0:
+                MSM_results_0.append(MSM_result)
+            elif typeIx == 1:
+                MSM_results_1.append(MSM_result)
 
         if verbose:
             print("MSM construction complete.")
 
-        return MSM_result
+        return MSM_results_0, MSM_results_1
     #
 
     # Get trajectory data from all files. Deals with file globbing.

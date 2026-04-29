@@ -1350,20 +1350,27 @@ def main(args):
                         s=0.5,
                     )
 
-                MSM = FNManager.MSM(result, lag=1,  n_states=5, verbose=True)
+                MSM_results_0, MSM_results_1 = FNManager.MSM(result, lag=1,  n_states=5, verbose=True)
 
                 #all_repeats all_thermoIxs 
                 
-                
-                for tyIx, typeVal in enumerate(all_types):
-                    pass 
-                    #print(f"tyIx, type", tyIx, typeVal)
-                    #print()
-                    # print("MSM assignments", MSM["assignments"])
-                    # print("MSM transition matrix", MSM["transition_matrix"])
-                    # print("MSM stationary distribution", MSM["stationary_distribution"])
-                    # print("MSM implied timescales", MSM["implied_timescales"])
-                    # print("MSM cluster centers", MSM["cluster_centers"])
+                # Iterate through the MSM results for each type
+                #for tyIx, typeVal in enumerate(types):
+                for mIx, MSM_result in enumerate(MSM_results_0):
+                    print(f"Type 0 MSM counter {mIx}")
+                    print("MSM assignments", MSM_result["assignments"])
+                    print("MSM transition matrix", MSM_result["transition_matrix"])
+                    print("MSM stationary distribution", MSM_result["stationary_distribution"])
+                    print("MSM implied timescales", MSM_result["implied_timescales"])
+                    print("MSM cluster centers", MSM_result["cluster_centers"])
+
+                for mIx, MSM_result in enumerate(MSM_results_1):
+                    print(f"Type 1 MSM counter {mIx}")
+                    print("MSM assignments", MSM_result["assignments"])
+                    print("MSM transition matrix", MSM_result["transition_matrix"])
+                    print("MSM stationary distribution", MSM_result["stationary_distribution"])
+                    print("MSM implied timescales", MSM_result["implied_timescales"])
+                    print("MSM cluster centers", MSM_result["cluster_centers"])
 
                 if not args.useAgg:
                     plt.show()
