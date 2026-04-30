@@ -12,6 +12,7 @@ import os
 import re
 import sys
 import glob
+import copy
 import pandas as pd
 import numpy as np
 from utils import *
@@ -502,7 +503,9 @@ class REXFNManager:
             # 1. Compute transition matrix
             # ------------------------------------------------------------
             T_current = np.zeros((n_states, n_states), dtype=float)
-            for ass in assignments:
+            #for ass in assignments:
+            ass = assignments[ix]
+            if True:
                 for labelIx in range(len(ass) - lag):
                     label_A = ass[labelIx]
                     label_B = ass[labelIx + lag]
@@ -513,10 +516,10 @@ class REXFNManager:
             row_sums[row_sums == 0] = 1.0  # avoid division by zero
             T_current = T_current / row_sums
 
-            if typeIx == 0:
-                T_typeIx_0.append(T_current)
-            elif typeIx == 1:
-                T_typeIx_1.append(T_current)
+            # if typeIx == 0:
+            #     T_typeIx_0.append(copy.deepcopy(T_current))
+            # elif typeIx == 1:
+            #     T_typeIx_1.append(copy.deepcopy(T_current))
             #endregion ---------------------------------------------------
 
             # ------------------------------------------------------------
@@ -531,10 +534,10 @@ class REXFNManager:
             pi_current = np.real(V__[:, idx])
             pi_current = pi_current / pi_current.sum()
 
-            if typeIx == 0:
-                pi_typeIx_0.append(pi_current)
-            elif typeIx == 1:
-                pi_typeIx_1.append(pi_current)
+            # if typeIx == 0:
+            #     pi_typeIx_0.append(copy.deepcopy(pi_current))
+            # elif typeIx == 1:
+            #     pi_typeIx_1.append(copy.deepcopy(pi_current))
             #endregion ---------------------------------------------------
 
             #-------------------------------------------------------------
@@ -548,25 +551,37 @@ class REXFNManager:
             its = -lag / np.log(eigvals[1:])          # skip eigenvalue 1
 
             if typeIx == 0:
-                its_typeIx_0.append(its)
+                its_typeIx_0.append(copy.deepcopy(its))
             elif typeIx == 1:
-                its_typeIx_1.append(its)
+                its_typeIx_1.append(copy.deepcopy(its))
             #endregion ---------------------------------------------------
 
             # ------------------------------------------------------------
             # 6. Return MSM object
             # ------------------------------------------------------------
-            MSM_result = {
-                "assignments": assignments,
-                "transition_matrix": T_current,
-                "stationary_distribution": pi_current,
-                "implied_timescales": its,
-                "cluster_centers": kmeans.cluster_centers_
-            }
             if typeIx == 0:
-                MSM_results_0.append(MSM_result)
+                MSM_results_0.append({
+                    "traj_info": trajInfo,
+                    "assignments": assignments,
+                    "transition_matrix": T_current,
+                    "stationary_distribution": pi_current,
+                    "implied_timescales": its,
+                    "cluster_centers": kmeans.cluster_centers_
+                })
             elif typeIx == 1:
-                MSM_results_1.append(MSM_result)
+                MSM_results_1.append({
+                    "traj_info": trajInfo,
+                    "assignments": assignments,
+                    "transition_matrix": T_current,
+                    "stationary_distribution": pi_current,
+                    "implied_timescales": its,
+                    "cluster_centers": kmeans.cluster_centers_
+                })
+
+            # if typeIx == 0:
+            #     MSM_results_0.append(copy.deepcopy(MSM_result))
+            # elif typeIx == 1:
+            #     MSM_results_1.append(copy.deepcopy(MSM_result))
 
         if verbose:
             print("MSM construction complete.")

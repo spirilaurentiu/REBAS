@@ -13,7 +13,7 @@ import scipy.stats
 from scipy.signal import find_peaks
 
 import matplotlib
-matplotlib.use('Agg')
+#matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 from mystats import LS_Statistics
@@ -382,7 +382,7 @@ def main(args):
 
     if OUTPUT_REQUIRED:
 
-        GLOBAL_BURNIN = 5000
+        GLOBAL_BURNIN = 10000
 
         #region Read output from all files
         if args.useCache and os.path.exists(args.outCacheFile):
@@ -692,7 +692,7 @@ def main(args):
                     nof_type1 += 1
                 elif sim_type == "3":
                     nof_type3 += 1
-                #print(f"Processing sim_type={sim_type}, seed={seed}, replicaIx={replicaIx} (group {ix})")
+                print(f"Processing sim_type={sim_type}, seed={seed}, replicaIx={replicaIx} (group {ix})")
                 
                 # Extract the data for THIS specific replica
                 obs_data = subdf_group["thermoIx"].to_numpy()
@@ -785,6 +785,8 @@ def main(args):
             ACF_rhos_mean_type1 = np.zeros(ACF_min, dtype=float)
             ACF_rhos_mean_type3 = np.zeros(ACF_min, dtype=float)
 
+
+            # WHAT IF ANY OF THE REPLICAS HAVE VARIANCE 0 !!!!!!!!
             for ix, acf in enumerate(ACF_rhos):
                 sim_type = observables_meta[ix]['sim_type']
                 if int(sim_type) == 1:
@@ -793,9 +795,16 @@ def main(args):
                     ACF_rhos_mean_type3 += acf
 
             if nof_type1 > 0:
-                ACF_rhos_mean_type1 /= nof_type1
+                # Chek if ACF_rhos_mean_type1 does not contain any nans
+                if not np.isnan(ACF_rhos_mean_type1).any():
+                    ACF_rhos_mean_type1 /= nof_type1
+                else:
+                    print("Warning: ACF_rhos_mean_type1 contains NaN values. Skipping division to avoid NaNs in the mean.")
             if nof_type3 > 0:
-                ACF_rhos_mean_type3 /= nof_type3
+                if not np.isnan(ACF_rhos_mean_type3).any():
+                    ACF_rhos_mean_type3 /= nof_type3
+                else:
+                    print("Warning: ACF_rhos_mean_type3 contains NaN values. Skipping division to avoid NaNs in the mean.")
 
             tau_ac_type1 = stats.getTau(ACF_rhos_mean_type1)
             tau_ac_type3 = stats.getTau(ACF_rhos_mean_type3)
@@ -803,7 +812,7 @@ def main(args):
             tau_ac_Hai_type1 = stats.getTau_ac(ACF_rhos_mean_type1)
             tau_ac_Hai_type3 = stats.getTau_ac(ACF_rhos_mean_type3)
 
-            PRINT__, PLOT__ = False, False
+            PRINT__, PLOT__ = True, True
             if PLOT__:
                 plot1D(
                     Y=obs_list_trimmed,
@@ -1353,24 +1362,27 @@ def main(args):
                 MSM_results_0, MSM_results_1 = FNManager.MSM(result, lag=1,  n_states=5, verbose=True)
 
                 #all_repeats all_thermoIxs 
-                
-                # Iterate through the MSM results for each type
-                #for tyIx, typeVal in enumerate(types):
-                for mIx, MSM_result in enumerate(MSM_results_0):
-                    print(f"Type 0 MSM counter {mIx}")
-                    print("MSM assignments", MSM_result["assignments"])
-                    print("MSM transition matrix", MSM_result["transition_matrix"])
-                    print("MSM stationary distribution", MSM_result["stationary_distribution"])
-                    print("MSM implied timescales", MSM_result["implied_timescales"])
-                    print("MSM cluster centers", MSM_result["cluster_centers"])
+                from utils import printNumpyND
 
+                # Iterate through the MSM results for each type
+                for mIx, MSM_result in enumerate(MSM_results_0):
+                    typeIx, repeatIx, thermoIx = MSM_result["traj_info"]
+                    print(f"Type 0 MSM counter {mIx} for trajectory with Type {types[typeIx]}, Repeat {repeats[repeatIx]}, Thermo {thermos[thermoIx]}")
+                    #print("MSM assignments", MSM_result["assignments"])
+                    #print("MSM transition matrix", MSM_result["transition_matrix"])
+                    printNumpyND("MSM transition matrix", MSM_result["transition_matrix"])
+                    printNumpyND("MSM stationary distribution", MSM_result["stationary_distribution"])
+                    printNumpyND("MSM implied timescales", MSM_result["implied_timescales"])
+                    printNumpyND("MSM cluster centers", MSM_result["cluster_centers"])
                 for mIx, MSM_result in enumerate(MSM_results_1):
-                    print(f"Type 1 MSM counter {mIx}")
-                    print("MSM assignments", MSM_result["assignments"])
-                    print("MSM transition matrix", MSM_result["transition_matrix"])
-                    print("MSM stationary distribution", MSM_result["stationary_distribution"])
-                    print("MSM implied timescales", MSM_result["implied_timescales"])
-                    print("MSM cluster centers", MSM_result["cluster_centers"])
+                    typeIx, repeatIx, thermoIx = MSM_result["traj_info"]
+                    print(f"Type 1 MSM counter {mIx} for trajectory with Type {types[typeIx]}, Repeat {repeats[repeatIx]}, Thermo {thermos[thermoIx]}")
+                    #print("MSM assignments", MSM_result["assignments"])
+                    #print("MSM transition matrix", MSM_result["transition_matrix"])
+                    printNumpyND("MSM transition matrix", MSM_result["transition_matrix"])
+                    printNumpyND("MSM stationary distribution", MSM_result["stationary_distribution"])
+                    printNumpyND("MSM implied timescales", MSM_result["implied_timescales"])
+                    printNumpyND("MSM cluster centers", MSM_result["cluster_centers"])
 
                 if not args.useAgg:
                     plt.show()

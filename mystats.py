@@ -12,8 +12,7 @@ class LS_Statistics:
 
     # Cumulative mean and standard deviation
     def cum_scum(self, X):
-        """
-        Cumulative mean and standard deviation of the mean (SOM).
+        """ Cumulative mean and standard deviation of the mean (SOM).
         Parameters
         ----------
         X : 1D np.ndarray
@@ -95,6 +94,7 @@ class LS_Statistics:
         return bin_centers, ensemble_mean, ensemble_std
     #
 
+    # Ensemble histogram with additional statistics: Shannon entropy and number of modes
     def ensemble_histogram_plus(self, traj_obs_list, density=True, bins=50, obs_range=None):
         """
         Calculates ensemble average distribution, standard deviation, 
@@ -140,6 +140,7 @@ class LS_Statistics:
             "num_modes": num_modes,
             "peak_indices": peaks
         }
+    #
 
     # Exchange matrix and HMC acceptance rate
     def exchange_matrix(self, out_df):
@@ -273,12 +274,22 @@ class LS_Statistics:
         """ Manual: Loop-based (Slow for large max_lag)
         """
         N = len(data)
-        xp = data - np.mean(data)
-        var = np.var(data)
+        #print(f"Data length (N): {N}") # Debug: print the length of the data
+        #print(f"Data sample (first 10 values): {data[:10]}") # Debug: print the first 10 values of the data
+        miu = np.nanmean(data)
+        #print(f"Mean (miu): {miu}") # Debug: print the mean
+        xp = data - miu
+        var = np.nanvar(data)
+        #print(f"Variance: {var}") # Debug: print the variance
+
+        if var == 0:
+            print(f"Variance of data is zero; autocorrelation undefined.")
+            return (np.full(N, np.nan), np.nan, np.nan)
+        
         max_lag = self.get_num_lags(N, lag_fraction, max_lag)
         
         # Calculate ACF up to num_lags
-        ACF_rho = np.array([np.sum(xp[l:] * xp[:N-l]) / (N * var) for l in range(max_lag)])
+        ACF_rho = np.array([np.sum(xp[lag:] * xp[:N-lag]) / (N * var) for lag in range(max_lag)])
         
         tau = self.getTau(ACF_rho)
         ess = N / tau
@@ -366,3 +377,9 @@ class LS_Statistics:
     #
 
     #endregion # autocorrelation --------------------------------------------------
+
+
+
+
+
+    
