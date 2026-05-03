@@ -141,7 +141,7 @@ class REXFNManager:
     #
 
     # Get trajectory data from a single file
-    def getTrajDataFromFile(self, FN, seed, sim_type, thermo_index, observable_func, *, frames=None, **obs_kwargs):
+    def getTrajDataFromFile(self, FN, seed, sim_type, thermo_index, observable_func, *, frames=None, verbose=False, **obs_kwargs):
         """ Get trajectory data from a single file
         :param FN: Filename
         :param seed: seed
@@ -165,6 +165,7 @@ class REXFNManager:
         obs, meta = rexTrajData.get_traj_observable(
             observable_func,
             frames=frames,
+            verbose=verbose,
             **obs_kwargs
         )
 
@@ -249,7 +250,7 @@ class REXFNManager:
     #
 
     # Get trajectory data extracted with passed functions
-    def getTrajDataFromAllFiles(self, observable_func, *, filters={}, frames=None, **obs_kwargs):
+    def getTrajDataFromAllFiles(self, observable_func, *, filters={}, frames=None, verbose=False, **obs_kwargs):
         
         # 1. Get metadata and dimensions from filenames
         if self.entries is None:
@@ -271,13 +272,14 @@ class REXFNManager:
 
         for row in self.entries:
             s_type, seed, repeatIx, thermoIx, FN = row
-            #print("s_type", s_type, "seed", seed, "r_ix", repeatIx, "t_ix", thermoIx, "FN", FN)
 
             try:
                 print(f"Reading {FN} ...", end=" ", flush=True)
                 obs, meta = self.getTrajDataFromFile(
                     FN, seed, s_type, thermoIx, observable_func,
-                    frames=frames, **obs_kwargs
+                    frames=frames,
+                    verbose=verbose,
+                    **obs_kwargs
                 )
 
                 # Capture dimensions
@@ -302,10 +304,10 @@ class REXFNManager:
 
         min_n_frames = min(n_frames_list)
         max_n_frames = max(n_frames_list)
-
-        #print(f"Probed {len(valid_results)} valid trajectories. Frame counts range from {min_n_frames} to {max_n_frames}. Observable dimension: {n_obs_dim}.")
-        # for vr in valid_results:
-        #     print(vr)
+        if verbose:
+            print(f"Read {len(valid_results)} valid trajectories. Frame range from {min_n_frames} to {max_n_frames}. Observable dimension: {n_obs_dim}.")
+            # for vr in valid_results:
+            #     print(vr)
 
         result = np.full((self.n_types, self.n_sims, self.n_reps, n_obs_dim, min_n_frames), np.nan)
 
@@ -319,6 +321,11 @@ class REXFNManager:
 
             # Truncate if necessary
             obs_to_store = obs[..., :min_n_frames] if n_frames > min_n_frames else obs
+
+            if verbose:
+                print(f"Truncating trajectory: typeIx={typeIx}, repeatIx={repeatIx}, thermoIx={thermoIx} from n_frames={n_frames} to min_n_frames={min_n_frames}. I got stored_shape={obs_to_store.shape}  obs_shape={obs.shape}")
+
+            # Cook result. Dimesnions: (type, repeat, thermo, obs_dim (= nof_observables), frames)
             result[typeIx, repeatIx, thermoIx, ..., :obs_to_store.shape[-1]] = obs_to_store
 
         return (result, uniq_sorted_types, uniq_sorted_repeats, uniq_sorted_thermos)

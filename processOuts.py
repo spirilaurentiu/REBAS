@@ -18,6 +18,7 @@ parser.add_argument('--dir', default=None, help='Directory with input data files
 parser.add_argument('--inFNRoots', nargs='+', required=True, help='Name roots for input data files')
 parser.add_argument('--procSuffix', help='Suffix to add to output files')
 parser.add_argument('--dry', action='store_true', help='If set, print results to console instead of writing to output file')
+parser.add_argument('--nofLines', type=int, default=10, help='Number of lines in output prcessed files')
 args = parser.parse_args()
 #endregion # Parse arguments
 

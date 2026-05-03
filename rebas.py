@@ -1,5 +1,6 @@
 # main.py
 import argparse
+from itertools import repeat
 import os
 import re
 import sys
@@ -193,6 +194,7 @@ def plot1D(Y,
            X=None,
            Yerr=None,
            Yerr_every=1,
+           instantiateFigure=True,
            title="title",
            xlabel="x",
            ylabel="y",
@@ -232,7 +234,8 @@ def plot1D(Y,
         labels = [None] * len(Y)
     
     # Plot generics
-    plt.figure()
+    if instantiateFigure:
+        plt.figure()
     plt.title(title)
     plt.xlabel(xlabel)
     plt.ylabel(ylabel)
@@ -382,7 +385,7 @@ def main(args):
 
     if OUTPUT_REQUIRED:
 
-        GLOBAL_BURNIN = 10000
+        GLOBAL_OUTPUT_BURNIN = 0
 
         #region Read output from all files
         if args.useCache and os.path.exists(args.outCacheFile):
@@ -390,7 +393,7 @@ def main(args):
             out_df = pd.read_pickle(args.outCacheFile)
         else:
             FNManager = REXFNManager(args.dir, args.inFNRoots, args.cols)
-            out_df = FNManager.getDataFromAllFiles(burnin = GLOBAL_BURNIN)
+            out_df = FNManager.getDataFromAllFiles(burnin = GLOBAL_OUTPUT_BURNIN)
 
             if args.writeCache:
                 if os.path.exists(args.outCacheFile):
@@ -468,61 +471,148 @@ def main(args):
             grouped = roboAna.df.groupby(['thermoIx', 'sim_type', 'seed'])
 
             nofThermodynamicStates = roboAna.df['thermoIx'].nunique()
+            lowest_thermoIx = roboAna.df['thermoIx'].min()
+            highest_thermoIx = roboAna.df['thermoIx'].max()
 
             direction_color = {0: 'blue', 1: 'red'}
             thermo_cmap = plt.get_cmap("tab20")
             #thermo_colors = [thermo_cmap(i) for i in np.linspace(0, 1, nofThermodynamicStates)]
             thermo_colors = ['blue', 'red']
 
-            plt.figure(figsize=(8, 4))
+            # Change plt to ax for better control and to avoid issues with multiple figures
+            #fig, ax = plt.subplots()
             burnin_local = 0
-            stop_at = 1000
+            stop_at = -1
             stride = 2
+
+            # # Get min and max delta PE across all groups to set consistent histogram bins
+            # all_delta_pe = []
+            # for (thermoIx, sim_type, seed), group in grouped:
+            #     for start_at in [0, 1]:
+            #         delta_pe = (group['pe_n'] - group['pe_o'])[(start_at + burnin_local) : stop_at][::stride]
+            #         # Remove zeros and NaNs which can mess up histogram scaling
+            #         delta_pe = delta_pe[np.abs(delta_pe) > 0.00001]  # remove zeros and near-zeros
+            #         delta_pe = delta_pe.dropna()
+            #         all_delta_pe.extend(delta_pe.to_numpy())
+            # min_delta_pe = min(all_delta_pe)
+            # max_delta_pe = max(all_delta_pe)
+            # print(f"Global min delta PE: {min_delta_pe}, max delta PE: {max_delta_pe}")
+            # # Calculate histograms for delta PE and plot them
+            # dpe_hists = {}  # {(sim_type, thermoIx, seed): (hist, bin_edges), ...}
+            # dpe_bin_centers = {}  # {(sim_type, thermoIx, seed): bin_centers, ...}
+            # for (thermoIx, sim_type, seed), group in grouped:
+            #     # Compute delta PE
+            #     #for start_at in [0, 1]:
+            #     #for start_at in [0]: # ala1
+            #     #for start_at in [1]: # ethane
+            #     for start_at in [0,1]: # trpch
+            #         delta_pe = (group['pe_n'] - group['pe_o'])[(start_at + burnin_local) : stop_at][::stride]
+            #         delta_pe = delta_pe[np.abs(delta_pe) > 0.00001]  # remove zeros and near-zeros
+            #         delta_pe = delta_pe.dropna()
+            #         delta_pe = delta_pe.to_numpy() # if isinstance(delta_pe, pd.Series) else np.asarray(delta_pe)
+            #         # Calculate histograms and the centers of the bins for delta_pe
+            #         #print(f"Calculating histogram for thermoIx={thermoIx}, sim_type={sim_type}, seed={seed}, start_at={start_at} ...")
+            #         dpe_hists[sim_type, thermoIx, seed], dpe_bin_edges = np.histogram(delta_pe, bins=400, range=(min_delta_pe, max_delta_pe), density=False)
+            #         dpe_bin_centers[sim_type, thermoIx, seed] = (dpe_bin_edges[:-1] + dpe_bin_edges[1:]) / 2
+            #         # plt.plot(delta_pe, marker='.', linestyle='-', alpha=0.7,
+            #         #          label=f"ΔPE thermoIx {thermoIx}",
+            #         #          color=thermo_colors[thermoIx%2])
+            #         # Color thermoIx 0 and 1 with blue and red, otherwise all thermoIx with grey
+            #         colors = [thermo_colors[thermoIx%2] if thermoIx in [5, 6] else 'grey' for thermoIx in range(highest_thermoIx + 1)]
+            #         plt.plot(dpe_bin_centers[sim_type, thermoIx, seed], dpe_hists[sim_type, thermoIx, seed],
+            #                  marker=None,  # no markers for histograms
+            #                  linestyle='-', alpha=0.7,
+            #                  #label=f"ΔPE thermoIx {thermoIx} sim_type {sim_type} seed {seed}",
+            #                  color=colors[thermoIx],
+            #                 )                  
+            #         plt.xlim(-120, 120)
+            #         #plt.title(f"ΔE = pe_n - pe_o (thermoIx={thermoIx}, sim_type={sim_type}, seed={seed})")
+            #         plt.title(f"ΔE")
+            #         plt.xlabel("ΔE (kJ/mol)")
+            #         plt.ylabel("Probability density")
+            #         #plt.legend()
+            #         plt.grid(True)
+            #         plt.tight_layout()
+            # plt.show()
+
+            #region First loop: compute delta_pe arrays
+            delta_pe_store = {}   # {(thermoIx, sim_type, seed, start_at): delta_pe_array}
+            all_delta_pe = []
             for (thermoIx, sim_type, seed), group in grouped:
-                # compute delta PE
-                #for start_at in [0, 1]:
-                #for start_at in [0]: # ala1
-                #for start_at in [1]: # ethane
-                for start_at in [0, 1]: # trpch
-                    delta_pe = (group['pe_n'] - group['pe_o'])[(start_at + burnin_local) : stop_at][::stride]
+                for start_at in [0, 1]:
+                    delta_pe = (group['pe_n'] - group['pe_o'])[(start_at + burnin_local):stop_at][::stride]
+                    delta_pe = delta_pe[np.abs(delta_pe) > 1e-5].dropna().to_numpy()
 
-                    plt.plot(delta_pe.values, marker='.', linestyle='-', alpha=0.7,
-                             label=f"ΔPE thermoIx {thermoIx}",
-                             color=thermo_colors[thermoIx%2])
+                    delta_pe_store[(thermoIx, sim_type, seed, start_at)] = delta_pe
 
-                    #plt.title(f"ΔE = pe_n - pe_o (thermoIx={thermoIx}, sim_type={sim_type}, seed={seed})")
-                    plt.title(f"ΔE")
-                    plt.xlabel("Index")
-                    plt.ylabel("ΔE")
-                    plt.legend()
-                    plt.grid(True)
-                    plt.tight_layout()
-            #plt.show()
+                    all_delta_pe.extend(delta_pe) # accumulate for global min/max
+
+            # Now compute global min/max once
+            min_delta_pe = min(all_delta_pe)
+            max_delta_pe = max(all_delta_pe)
+            print(f"Global min delta PE: {min_delta_pe}, max delta PE: {max_delta_pe}")
+            #endregion # compute delta_pe arrays
+
+            #region Second loop: get histograms
+            dpe_hists = {}
+            dpe_bin_centers = {}
+            for (thermoIx, sim_type, seed), group in grouped:
+                for start_at in [0, 1]:
+                    delta_pe = delta_pe_store[(thermoIx, sim_type, seed, start_at)]
+
+                    hist, bin_edges = np.histogram(
+                        delta_pe, bins=400, range=(min_delta_pe, max_delta_pe), density=False
+                    )
+
+                    dpe_hists[(sim_type, thermoIx, seed, start_at)] = hist
+                    centers = (bin_edges[:-1] + bin_edges[1:]) / 2
+                    dpe_bin_centers[(sim_type, thermoIx, seed, start_at)] = centers
+            #endregion # get histograms
+
+
+            #region Third loop: plot histograms
+            plt.figure()
+            for (thermoIx, sim_type, seed), group in grouped:
+                for start_at in [0, 1]:
+
+                    color = thermo_colors[thermoIx % 2] if thermoIx in [5, 6] else 'grey'
+
+                    plt.plot(
+                        dpe_bin_centers[(sim_type, thermoIx, seed, start_at)],
+                        dpe_hists[(sim_type, thermoIx, seed, start_at)],
+                        linestyle='-', alpha=0.7,
+                        color=color
+                    )
+
+            plt.xlim(-120, 120)
+            plt.title("ΔE")
+            plt.xlabel("ΔE (kJ/mol)")
+            plt.ylabel("Probability counts")
+            plt.grid(True)
+            plt.tight_layout()
+            plt.show()
+            #endregion # plot histograms
 
             #dpeHist_df = roboAna.delta_pe_histograms(bins=50)
             ##plot_histogram(dpeHist_df, save_path=f"check_dpe_hist.png")
             #plot_histogram(dpeHist_df)
-
-            plt.figure(figsize=(8, 4))
-            burnin_local = 0
-            stop_at = 1000
-            stride = 2
-            for (thermoIx, sim_type, seed), group in grouped:
-                
-                for start_at in [0, 1]: # trpch
-
-                    JDetLog = group['JDetLog'][(start_at + burnin_local) : stop_at][::stride]
-
-                    plt.plot(JDetLog.values, marker='.', linestyle='-', alpha=0.7,
-                             label=f"JDetLog thermoIx {thermoIx}",
-                             color=thermo_colors[thermoIx%2])  
-                    plt.title(f"JDetLog")
-                    plt.xlabel("Index")
-                    plt.ylabel("JDetLog")
-                    plt.legend()
-                    plt.grid(True)
-                    plt.tight_layout()
-            plt.show()
+            # plt.figure(figsize=(8, 4))
+            # burnin_local = 0
+            # stop_at = 1000
+            # stride = 2
+            # for (thermoIx, sim_type, seed), group in grouped:
+            #     for start_at in [0, 1]: # trpch
+            #         JDetLog = group['JDetLog'][(start_at + burnin_local) : stop_at][::stride]
+            #         plt.plot(JDetLog.values, marker='.', linestyle='-', alpha=0.7,
+            #                  label=f"JDetLog thermoIx {thermoIx}",
+            #                  color=thermo_colors[thermoIx%2])  
+            #         plt.title(f"JDetLog")
+            #         plt.xlabel("Index")
+            #         plt.ylabel("JDetLog")
+            #         plt.legend()
+            #         plt.grid(True)
+            #         plt.tight_layout()
+            # plt.show()
 
         #endregion
 
@@ -729,12 +819,10 @@ def main(args):
                 #print("obs_tau", obs_tau)
                 (ACF_rho, obs_tau, ess) = stats.autocorr2_revised(obs_data, lag_fraction=0.5, max_lag=50000)
                 #print("obs_tau", obs_tau)
-                #(ACF_rho, obs_tau, ess) = stats.autocorr3_revised(obs_data, lag_fraction=0.5, max_lag=50000)
-                #print("obs_tau", obs_tau)
 
                 ACF_rhos.append(ACF_rho)
                 obs_taus.append(obs_tau)
-                
+
                 obs_statisticalEnergy = obs_std / (obs_tau)
                 obs_statisticalEnergy *= 1000  # scale to make more readable
                 obs_statisticalEnergy = obs_statisticalEnergy**2
@@ -769,7 +857,8 @@ def main(args):
             max_num_frames = max(len(Y) for Y in observables)
             min_glob = min(Y.min() for Y in observables)
             max_glob = max(Y.max() for Y in observables)
-            obs_list_trimmed = np.array([Y[:min_num_frames] for Y in observables])
+            #obs_list_trimmed = np.array([Y[:min_num_frames] for Y in observables])
+            obs_list_trimmed = np.stack([Y[:min_num_frames] for Y in observables], axis=0)
             #print(obs_list_trimmed.shape)
 
             cumMean_list = []
@@ -781,30 +870,20 @@ def main(args):
 
             ACF_min = min(len(acf) for acf in ACF_rhos)
             ACF_rhos = np.array([acf[:ACF_min] for acf in ACF_rhos])
+            # for ix, acf in enumerate(ACF_rhos):
+            #     print(f"ACF_rho shape anynan: {acf.shape}, anynan: {np.isnan(acf).any()}")
 
-            ACF_rhos_mean_type1 = np.zeros(ACF_min, dtype=float)
-            ACF_rhos_mean_type3 = np.zeros(ACF_min, dtype=float)
+            # --- Convert sim types to array ---
+            sim_types = np.array([int(meta["sim_type"]) for meta in observables_meta])
 
+            # Masks
+            mask1 = sim_types == 1
+            mask3 = sim_types == 3
 
-            # WHAT IF ANY OF THE REPLICAS HAVE VARIANCE 0 !!!!!!!!
-            for ix, acf in enumerate(ACF_rhos):
-                sim_type = observables_meta[ix]['sim_type']
-                if int(sim_type) == 1:
-                    ACF_rhos_mean_type1 += acf
-                elif int(sim_type) == 3:
-                    ACF_rhos_mean_type3 += acf
-
-            if nof_type1 > 0:
-                # Chek if ACF_rhos_mean_type1 does not contain any nans
-                if not np.isnan(ACF_rhos_mean_type1).any():
-                    ACF_rhos_mean_type1 /= nof_type1
-                else:
-                    print("Warning: ACF_rhos_mean_type1 contains NaN values. Skipping division to avoid NaNs in the mean.")
-            if nof_type3 > 0:
-                if not np.isnan(ACF_rhos_mean_type3).any():
-                    ACF_rhos_mean_type3 /= nof_type3
-                else:
-                    print("Warning: ACF_rhos_mean_type3 contains NaN values. Skipping division to avoid NaNs in the mean.")
+            # --- Compute means safely (handles zero-variance cases) ---
+            # If no samples of a type exist, return zeros
+            ACF_rhos_mean_type1 = np.nanmean(ACF_rhos[mask1], axis=0) if mask1.any() else np.zeros(ACF_min)
+            ACF_rhos_mean_type3 = np.nanmean(ACF_rhos[mask3], axis=0) if mask3.any() else np.zeros(ACF_min)
 
             tau_ac_type1 = stats.getTau(ACF_rhos_mean_type1)
             tau_ac_type3 = stats.getTau(ACF_rhos_mean_type3)
@@ -814,9 +893,10 @@ def main(args):
 
             PRINT__, PLOT__ = True, True
             if PLOT__:
+                Slice_To_Show = slice(0, 50)
                 plot1D(
-                    Y=obs_list_trimmed,
-                    title="thermoIx trajectories (trimmed to min length)",
+                    Y=[obs_list_trimmed[ix][Slice_To_Show] for ix in range(len(obs_list_trimmed))],
+                    title="ThermoIx trajectories (trimmed to min length)",
                     xlabel="Frame Index",
                     ylabel="thermoIx (State)",
                     labels=[f"Seed {observables_meta[ix]['seed']} Type {observables_meta[ix]['sim_type']} Rep {observables_meta[ix]['replicaIx']}" \
@@ -987,11 +1067,11 @@ def main(args):
 
             utilObj = REXFNManager()
 
-            GLOBAL_BURNIN = 10000
+            GLOBAL_TRAJ_BURNIN = 10
             GLOBAL_END = None
 
             # pick your frame slice once:
-            frames = slice(GLOBAL_BURNIN, GLOBAL_END)   # or slice(GLOBAL_BURNIN, None)
+            frames = slice(GLOBAL_TRAJ_BURNIN, GLOBAL_END)   # or slice(GLOBAL_BURNIN, None)
 
             FNManager = REXFNManager(args.dir, args.inFNRoots, args.cols, topology=args.topology)
             FNManager.prepareTrajArraySize(filters=filters)
@@ -1142,7 +1222,7 @@ def main(args):
             
             #endregion # extractors
 
-            DO_GEOMETRY, DO_PCA = False, True
+            DO_GEOMETRY, DO_PCA = True, False
 
             if DO_GEOMETRY:
 
@@ -1150,50 +1230,79 @@ def main(args):
                 obs_name = distances.__name__
                 obs_title = "End-to-End Distance"
                 #obs_title = "Trp-Cage PMF Indicator"
-                (observables, u_types, u_repeats, u_thermos) = FNManager.getTrajDataFromAllFiles(
+                #(result, uniq_sorted_types, uniq_sorted_repeats, uniq_sorted_thermos)
+
+                (observables, uniq_types, uniq_repeats, uniq_thermos) = FNManager.getTrajDataFromAllFiles(
                     distances,
                     filters=filters,
                     frames=frames,
-                    pairs=[[8, 298], [100, 200]],
+                    pairs=[[8, 298]],
                     #phi_psi="psi",  # optional; only for dihedral_phi_psi
                     #resid=11,       # optional; only for dihedral_phi_psi
+                    verbose=False
                 )
 
                 print("observables.shape", observables.shape)
                 n_types, n_repeats, n_thermos, n_observables, n_frames = observables.shape
-                # print("observables", observables)
+                #print("observables", observables)
                 # print("u_types", u_types)
                 # print("u_repeats", u_repeats)
                 # print("u_thermos", u_thermos)
 
-                PRINT__, PLOT__ = True, True
-                if PRINT__:
-                    print("Unique sim types:", u_types)
-                    print("Unique repeats:", u_repeats)
-                    print("Unique thermos:", u_thermos)
-                if PLOT__:
-                    plotFN = None
-                    if args.useAgg:
-                        plotFN = f"traj_{obs_name}.png"
+                #region General stats
+                # Get all possible mins and maxs by type/repeat/thermo/observable
+                obs_detailed_mins = np.array([np.nanmin(observables[typeIx, repeatIx, thermoIx, obsIx,:]) \
+                                    for typeIx in range(n_types) \
+                                    for repeatIx in range(n_repeats) \
+                                    for thermoIx in range(n_thermos) \
+                                    for obsIx in range(n_observables)]).reshape((n_types, n_repeats, n_thermos, n_observables))
+                obs_detailed_maxs = np.array([np.nanmax(observables[typeIx, repeatIx, thermoIx, obsIx,:]) \
+                                    for typeIx in range(n_types) \
+                                    for repeatIx in range(n_repeats) \
+                                    for thermoIx in range(n_thermos) \
+                                    for obsIx in range(n_observables)]).reshape((n_types, n_repeats, n_thermos, n_observables))
+                # Get mins by observable ignoring type/repeat/thermo
+                obs_mins = np.array([np.nanmin(observables[:,:,:,obsIx,:]) for obsIx in range(n_observables)])
+                obs_maxs = np.array([np.nanmax(observables[:,:,:,obsIx,:]) for obsIx in range(n_observables)])
+                obs_global_min = np.nanmin(observables)
+                obs_global_max = np.nanmax(observables)
 
-                    simIx = 0
-                    replicaIx = 0
-                    obsIx = 0
-                    Y_series = observables[:, simIx, replicaIx, obsIx,:]
-                    print(Y_series.shape)
+                # Get standard deviation by observable ignoring type/repeat/thermo
+                obs_means = np.array([np.nanmean(observables[:,:,:,obsIx,:]) for obsIx in range(n_observables)])
+                obs_stds = np.array([np.nanstd(observables[:,:,:,obsIx,:]) for obsIx in range(n_observables)])
+
+                #endregion
+
+                replicaIx = 0
+                obsIx = 0
+                for simIx in range(n_repeats):
+
+                    # Observables timeseries plots
+                    PRINT__, PLOT__ = True, False
+                    if PRINT__:
+                        print("Unique sim types:", uniq_types)
+                        print("Unique repeats:", uniq_repeats)
+                        print("Unique thermos:", uniq_thermos)
+                    if PLOT__:
+                        plotFN = None
+                        if args.useAgg:
+                            plotFN = f"traj_{obs_name}.png"
+
+                        Y_series = observables[:, simIx, replicaIx, obsIx,:]
+                        print(Y_series.shape)
+                        
+                        plot1D(
+                            Y = Y_series,
+                            title=obs_title,
+                            xlabel="Frame",
+                            ylabel=obs_name,
+                            labels=[f"Repeat {simIx} Type {uniq_types[ix]} Thermo {replicaIx}" for ix in range(len(observables))],
+                            colors=[colorByType(uniq_types[ix]) for ix in range(len(observables))],
+                            save_path=plotFN
+                        )
                     
-                    plot1D(
-                        Y = Y_series,
-                        title=obs_title,
-                        xlabel="Frame",
-                        ylabel=obs_name,
-                        labels=[f"Seed {u_repeats[ix]} Type {u_types[ix]} Thermo {u_thermos[ix]}" for ix in range(len(observables))],
-                        colors=[colorByType(u_types[ix]) for ix in range(len(observables))],
-                        save_path=plotFN
-                    )
-                
-                    if args.useAgg:
-                        plt.savefig(plotFN)
+                        if args.useAgg:
+                            plt.savefig(plotFN)
 
                 # Cumulative mean and std
                 cummean_obs = np.full_like(observables, fill_value=np.nan)
@@ -1209,31 +1318,44 @@ def main(args):
                                 cummean_obs[typeIx, repeatIx, thermoIx, obsIx,:] = cummean
                                 cumstd_obs[typeIx, repeatIx, thermoIx, obsIx,:] = cumstd
 
-                PRINT__, PLOT__ = True, True
-                if PRINT__:
-                    print("cum_mean shape:", cummean_obs.shape)
-                    print("cum_std shape:", cumstd_obs.shape)
-                if PLOT__:
-                    plot1D(
-                        Y=cummean_obs[:, simIx, replicaIx, obsIx,:],
-                        title=obs_title + " Cumulative Mean",
-                        xlabel="Frame",
-                        ylabel=obs_name + " Cumulative Mean",
-                        labels=[f"Seed {u_repeats[ix]} Type {u_types[ix]} Thermo {u_thermos[ix]}" for ix in range(len(observables))],
-                        colors=[colorByType(u_types[ix]) for ix in range(len(observables))],
-                        save_path=f"traj_{obs_name}_cum_mean.png" if args.useAgg else None
-                    )
+                cummean_min = np.nanmin(cummean_obs)
+                cummean_max = np.nanmax(cummean_obs)
 
-                    plot1D(
-                        Y=cumstd_obs[:, simIx, replicaIx, obsIx,:],
-                        title=obs_title + " Cumulative Std",
-                        xlabel="Frame",
-                        ylabel=obs_name + " Cumulative Std",
-                        labels=[f"Seed {u_repeats[ix]} Type {u_types[ix]} Thermo {u_thermos[ix]}" for ix in range(len(observables))],
-                        colors=[colorByType(u_types[ix]) for ix in range(len(observables))],
-                        save_path=f"traj_{obs_name}_cum_std.png" if args.useAgg else None
-                    )
+                replicaIx = 0
+                obsIx = 0
+                plt.figure()
+                for simIx in range(n_repeats):
 
+                    # Cumulative mean and std plots
+                    PRINT__, PLOT__ = True, True
+                    if PRINT__:
+                        print("cum_mean shape:", cummean_obs.shape)
+                        print("cum_std shape:", cumstd_obs.shape)
+                    if PLOT__:
+                        ylim = (obs_means[obsIx] - (2.0 * obs_stds[obsIx]), obs_means[obsIx] + (2.0 * obs_stds[obsIx]))
+                        plot1D(
+                            Y=cummean_obs[:, simIx, replicaIx, obsIx,:],
+                            ylim=ylim,
+                            instantiateFigure=False,
+                            title=obs_title + " Cumulative Mean",
+                            xlabel="Frame",
+                            ylabel=obs_name + " Cumulative Mean",
+                            #labels=[f"Repeat {simIx} Type {uniq_types[ix]} Thermo {replicaIx}" for ix in range(len(observables))],
+                            colors=[colorByType(uniq_types[ix]) for ix in range(len(observables))],
+                            save_path=f"traj_{obs_name}_cum_mean.png" if args.useAgg else None
+                        )
+
+                        # plot1D(
+                        #     Y=cumstd_obs[:, simIx, replicaIx, obsIx,:],
+                        #     title=obs_title + " Cumulative Std",
+                        #     xlabel="Frame",
+                        #     ylabel=obs_name + " Cumulative Std",
+                        #     labels=[f"Repeat {simIx} Type {uniq_types[ix]} Thermo {replicaIx}" for ix in range(len(observables))],
+                        #     colors=[colorByType(uniq_types[ix]) for ix in range(len(observables))],
+                        #     save_path=f"traj_{obs_name}_cum_std.png" if args.useAgg else None
+                        # )
+
+                # Finish plots
                 if not args.useAgg:
                     plt.show()
                 plt.close()            

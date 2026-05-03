@@ -50,7 +50,7 @@ class REXTrajData:
         return self.traj.xyz[:, selection, :]
     #
 
-    def get_traj_observable(self, observable="rg", *, frames=None, **kwargs):
+    def get_traj_observable(self, observable="rg", *, frames=None, verbose=False, **kwargs):
         """ Get observable from trajectory
         Args:
             observable (str or callable): Observable to compute. If str, must be a key in self._observables.
