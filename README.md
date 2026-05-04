@@ -21,8 +21,7 @@ python ~/git6/REBAS/prod_valid_eth_thermo.py --dir prod/ethane/examSlider/ --inF
 
 ### ======== VALIDATION dpe
 
-python ~/git6/REBAS/rebas.py --dir prod/ala1/everyRepl.00.mi6/ --inFNRoots out.detail.2030500 --cols replicaIx thermoIx wIx acc pe_o pe_n JDetLog --filterBy wIx=3 thermoIx=1,2 --checks dpe  
-python ~/git6/REBAS/rebas.py --dir prod/trpch/everyRepl.09.mi6/ --inFNRoots out.detail.3030500 --cols replicaIx thermoIx wIx acc pe_o pe_n JDetLog --filterBy wIx=3 thermoIx=1,2 --checks dpe  
+python ~/git6/REBAS/rebas.py --dir prod/ala1/everyRepl.00.mi7/ --inFNRoots out.detail.2030500 --cols replicaIx thermoIx wIx acc pe_o pe_n JDetLog --filterBy wIx=3 thermoIx=1,2,3,4,5,6,7,8 --checks dpe  
 
 ### ======== EFFICIENCY thermodynamic space
 
@@ -32,6 +31,7 @@ ython ~/git6/REBAS/rebas.py --dir prod/trpch/everyRepl.09.mi6/final/ --inFNRoots
 ### ======== EFFICIENCY conformational space
 
 python ~/git6/REBAS/rebas.py --dir prod/ala1/everyRepl.00.mi6/ --inFNRoots ala1_ --topology ala1/ligand.prmtop --cols replicaIx thermoIx wIx acc pe_o --filterBy thermoIx=0 --figures traj_stats  
+python ~/git6/REBAS/rebas.py --dir prod/trpch/everyRepl.09.mi6.04/ --inFNRoots trpch_ --topology trpch/ligand.prmtop --cols replicaIx thermoIx wIx acc pe_o --filterBy thermoIx=0,13 --figures traj_stats
 
 ### ======== ANALYSIS
 

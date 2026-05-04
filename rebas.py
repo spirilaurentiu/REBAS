@@ -387,6 +387,29 @@ def main(args):
 
         GLOBAL_OUTPUT_BURNIN = 0
 
+        #region Test plotting
+        if "test_plot" in args.checks:
+
+            # Plot with inset
+            fig, mainAx = plt.subplots()
+
+            # Size in unitless percentages of the figure size.
+            width = 0.2
+            height = 0.2            
+
+            # Position (0, 0 is bottom left)
+            from_left = 0.6
+            from_bottom = 0.6
+            insetAx = fig.add_axes([from_left, from_bottom, width, height])
+
+            mainAx.plot(range(10), color='red')
+            insetAx.plot(range(6)[::-1], color='green')
+
+            plt.show()
+
+            sys.exit()
+        #endregion
+
         #region Read output from all files
         if args.useCache and os.path.exists(args.outCacheFile):
             print(f"Loading data from cache: {args.outCacheFile}")
@@ -479,71 +502,39 @@ def main(args):
             #thermo_colors = [thermo_cmap(i) for i in np.linspace(0, 1, nofThermodynamicStates)]
             thermo_colors = ['blue', 'red']
 
-            # Change plt to ax for better control and to avoid issues with multiple figures
-            #fig, ax = plt.subplots()
             burnin_local = 0
             stop_at = -1
             stride = 2
 
-            # # Get min and max delta PE across all groups to set consistent histogram bins
-            # all_delta_pe = []
-            # for (thermoIx, sim_type, seed), group in grouped:
-            #     for start_at in [0, 1]:
-            #         delta_pe = (group['pe_n'] - group['pe_o'])[(start_at + burnin_local) : stop_at][::stride]
-            #         # Remove zeros and NaNs which can mess up histogram scaling
-            #         delta_pe = delta_pe[np.abs(delta_pe) > 0.00001]  # remove zeros and near-zeros
-            #         delta_pe = delta_pe.dropna()
-            #         all_delta_pe.extend(delta_pe.to_numpy())
-            # min_delta_pe = min(all_delta_pe)
-            # max_delta_pe = max(all_delta_pe)
-            # print(f"Global min delta PE: {min_delta_pe}, max delta PE: {max_delta_pe}")
-            # # Calculate histograms for delta PE and plot them
-            # dpe_hists = {}  # {(sim_type, thermoIx, seed): (hist, bin_edges), ...}
-            # dpe_bin_centers = {}  # {(sim_type, thermoIx, seed): bin_centers, ...}
-            # for (thermoIx, sim_type, seed), group in grouped:
-            #     # Compute delta PE
-            #     #for start_at in [0, 1]:
-            #     #for start_at in [0]: # ala1
-            #     #for start_at in [1]: # ethane
-            #     for start_at in [0,1]: # trpch
-            #         delta_pe = (group['pe_n'] - group['pe_o'])[(start_at + burnin_local) : stop_at][::stride]
-            #         delta_pe = delta_pe[np.abs(delta_pe) > 0.00001]  # remove zeros and near-zeros
-            #         delta_pe = delta_pe.dropna()
-            #         delta_pe = delta_pe.to_numpy() # if isinstance(delta_pe, pd.Series) else np.asarray(delta_pe)
-            #         # Calculate histograms and the centers of the bins for delta_pe
-            #         #print(f"Calculating histogram for thermoIx={thermoIx}, sim_type={sim_type}, seed={seed}, start_at={start_at} ...")
-            #         dpe_hists[sim_type, thermoIx, seed], dpe_bin_edges = np.histogram(delta_pe, bins=400, range=(min_delta_pe, max_delta_pe), density=False)
-            #         dpe_bin_centers[sim_type, thermoIx, seed] = (dpe_bin_edges[:-1] + dpe_bin_edges[1:]) / 2
-            #         # plt.plot(delta_pe, marker='.', linestyle='-', alpha=0.7,
-            #         #          label=f"ΔPE thermoIx {thermoIx}",
-            #         #          color=thermo_colors[thermoIx%2])
-            #         # Color thermoIx 0 and 1 with blue and red, otherwise all thermoIx with grey
-            #         colors = [thermo_colors[thermoIx%2] if thermoIx in [5, 6] else 'grey' for thermoIx in range(highest_thermoIx + 1)]
-            #         plt.plot(dpe_bin_centers[sim_type, thermoIx, seed], dpe_hists[sim_type, thermoIx, seed],
-            #                  marker=None,  # no markers for histograms
-            #                  linestyle='-', alpha=0.7,
-            #                  #label=f"ΔPE thermoIx {thermoIx} sim_type {sim_type} seed {seed}",
-            #                  color=colors[thermoIx],
-            #                 )                  
-            #         plt.xlim(-120, 120)
-            #         #plt.title(f"ΔE = pe_n - pe_o (thermoIx={thermoIx}, sim_type={sim_type}, seed={seed})")
-            #         plt.title(f"ΔE")
-            #         plt.xlabel("ΔE (kJ/mol)")
-            #         plt.ylabel("Probability density")
-            #         #plt.legend()
-            #         plt.grid(True)
-            #         plt.tight_layout()
-            # plt.show()
-
             #region First loop: compute delta_pe arrays
             delta_pe_store = {}   # {(thermoIx, sim_type, seed, start_at): delta_pe_array}
+            work_store = {}       # {(thermoIx, sim_type, seed, start_at): work_array}
             all_delta_pe = []
             for (thermoIx, sim_type, seed), group in grouped:
                 for start_at in [0, 1]:
-                    delta_pe = (group['pe_n'] - group['pe_o'])[(start_at + burnin_local):stop_at][::stride]
+                    
+                    # Energy
+                    delta_pe = (group['pe_n'] - group['pe_o'])[(start_at + burnin_local) : stop_at][::stride]
+                    
+                    # Jacobian
+                    JDetLog = group['JDetLog'][(start_at + burnin_local) : stop_at][::stride]
+                    
+                    print(f"Processing thermoIx={thermoIx}, sim_type={sim_type}, seed={seed}, start_at={start_at}", end=' ')
+                    print("delta_pe", delta_pe.shape, "anynan:", np.isnan(delta_pe).any(), end=' ')
+                    print("JDetLog", JDetLog.shape, "anynan:", np.isnan(JDetLog).any(), end=' ')
+
+                    work = delta_pe - JDetLog
+
+                    print("work", work.shape, "anynan:", np.isnan(work).any(), end=' ')
+
+                    work = work[np.abs(work) > 1e-5].dropna().to_numpy()
+
+                    print("work proc", work.shape, "anynan:", np.isnan(work).any())
+
                     delta_pe = delta_pe[np.abs(delta_pe) > 1e-5].dropna().to_numpy()
 
                     delta_pe_store[(thermoIx, sim_type, seed, start_at)] = delta_pe
+                    work_store[(thermoIx, sim_type, seed, start_at)] = work
 
                     all_delta_pe.extend(delta_pe) # accumulate for global min/max
 
@@ -558,17 +549,22 @@ def main(args):
             dpe_bin_centers = {}
             for (thermoIx, sim_type, seed), group in grouped:
                 for start_at in [0, 1]:
+
                     delta_pe = delta_pe_store[(thermoIx, sim_type, seed, start_at)]
+                    work = work_store[(thermoIx, sim_type, seed, start_at)]
 
                     hist, bin_edges = np.histogram(
-                        delta_pe, bins=400, range=(min_delta_pe, max_delta_pe), density=False
+                        work,
+                        range=(min_delta_pe, max_delta_pe),
+                        bins=400, density=False
                     )
 
                     dpe_hists[(sim_type, thermoIx, seed, start_at)] = hist
                     centers = (bin_edges[:-1] + bin_edges[1:]) / 2
                     dpe_bin_centers[(sim_type, thermoIx, seed, start_at)] = centers
-            #endregion # get histograms
 
+            global_max_hist = max(hist.max() for hist in dpe_hists.values())
+            #endregion # get histograms
 
             #region Third loop: plot histograms
             plt.figure()
@@ -584,35 +580,59 @@ def main(args):
                         color=color
                     )
 
-            plt.xlim(-120, 120)
-            plt.title("ΔE")
-            plt.xlabel("ΔE (kJ/mol)")
-            plt.ylabel("Probability counts")
-            plt.grid(True)
+                    ax = plt.gca()
+                    yticks = ax.get_yticks()
+                    ax.set_yticklabels([f"{y/global_max_hist:.2f}" for y in yticks])
+
+            #plt.xlim(-120, 120) # ala1
+            #plt.title("ΔE")
+            plt.title("Work = ΔE - JDetLog")
+            plt.xlabel("W (kJ/mol)")
+            plt.ylabel("Probability density")
+            plt.grid(False)
             plt.tight_layout()
             plt.show()
             #endregion # plot histograms
 
+            # Get delta delta E
+            del_del_pe_store = {}
+            for (thermoIx, sim_type, seed), group in grouped:
+                if thermoIx + 1 > highest_thermoIx:
+                    continue  # skip if no next thermo state exists
+                
+                for start_at in [0, 1]:
+                    delta_pe_C = delta_pe_store[(thermoIx,   sim_type, seed, start_at)]
+                    delta_pe_H = delta_pe_store[(thermoIx+1, sim_type, seed, start_at)]
+
+                    min_len = min(len(delta_pe_C), len(delta_pe_H))
+
+                    del_del_pe = delta_pe_H[:min_len] + delta_pe_C[:min_len]
+                    del_del_pe_store[(thermoIx, sim_type, seed, start_at)] = del_del_pe
+            
+            # Plot delta delta E
+            plt.figure()
+            for (thermoIx, sim_type, seed), group in grouped:
+                for start_at in [0, 1]:
+                    if thermoIx + 1 > highest_thermoIx:
+                        continue  # skip if no next thermo state exists
+
+                    del_del_pe = del_del_pe_store[(thermoIx, sim_type, seed, start_at)]
+                
+                    color = thermo_colors[thermoIx % 2] if thermoIx in [5, 6] else 'grey'
+                
+                    #hist, bin_edges = np.histogram(del_del_pe, bins=50, density=True)
+                    #centers = (bin_edges[:-1] + bin_edges[1:]) / 2
+                    
+                    # First plot a timeseries of del_del_pe
+                    plt.plot(del_del_pe[0:300][::1], linestyle='-', alpha=0.7, color=color)
+            
+            plt.title("ΔΔE between neighbor thermo states")
+            plt.show()
+            
+            
+            
+            
             #dpeHist_df = roboAna.delta_pe_histograms(bins=50)
-            ##plot_histogram(dpeHist_df, save_path=f"check_dpe_hist.png")
-            #plot_histogram(dpeHist_df)
-            # plt.figure(figsize=(8, 4))
-            # burnin_local = 0
-            # stop_at = 1000
-            # stride = 2
-            # for (thermoIx, sim_type, seed), group in grouped:
-            #     for start_at in [0, 1]: # trpch
-            #         JDetLog = group['JDetLog'][(start_at + burnin_local) : stop_at][::stride]
-            #         plt.plot(JDetLog.values, marker='.', linestyle='-', alpha=0.7,
-            #                  label=f"JDetLog thermoIx {thermoIx}",
-            #                  color=thermo_colors[thermoIx%2])  
-            #         plt.title(f"JDetLog")
-            #         plt.xlabel("Index")
-            #         plt.ylabel("JDetLog")
-            #         plt.legend()
-            #         plt.grid(True)
-            #         plt.tight_layout()
-            # plt.show()
 
         #endregion
 
