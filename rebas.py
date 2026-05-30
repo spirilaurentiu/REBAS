@@ -613,7 +613,7 @@ def main(args):
             plt.figure()
             for (thermoIx, sim_type, seed), group in grouped:
                 for start_at in [0, 1]:
-                    if thermoIx + 1 > highest_thermoIx:
+                    if (thermoIx + 1) > highest_thermoIx:
                         continue  # skip if no next thermo state exists
 
                     del_del_pe = del_del_pe_store[(thermoIx, sim_type, seed, start_at)]
@@ -1242,7 +1242,7 @@ def main(args):
             
             #endregion # extractors
 
-            DO_GEOMETRY, DO_PCA = True, False
+            DO_GEOMETRY, DO_PCA = True, True
 
             if DO_GEOMETRY:
 
@@ -1365,15 +1365,15 @@ def main(args):
                             save_path=f"traj_{obs_name}_cum_mean.png" if args.useAgg else None
                         )
 
-                        # plot1D(
-                        #     Y=cumstd_obs[:, simIx, replicaIx, obsIx,:],
-                        #     title=obs_title + " Cumulative Std",
-                        #     xlabel="Frame",
-                        #     ylabel=obs_name + " Cumulative Std",
-                        #     labels=[f"Repeat {simIx} Type {uniq_types[ix]} Thermo {replicaIx}" for ix in range(len(observables))],
-                        #     colors=[colorByType(uniq_types[ix]) for ix in range(len(observables))],
-                        #     save_path=f"traj_{obs_name}_cum_std.png" if args.useAgg else None
-                        # )
+                        plot1D(
+                            Y=cumstd_obs[:, simIx, replicaIx, obsIx,:],
+                            title=obs_title + " Cumulative Std",
+                            xlabel="Frame",
+                            ylabel=obs_name + " Cumulative Std",
+                            labels=[f"Repeat {simIx} Type {uniq_types[ix]} Thermo {replicaIx}" for ix in range(len(observables))],
+                            colors=[colorByType(uniq_types[ix]) for ix in range(len(observables))],
+                            save_path=f"traj_{obs_name}_cum_std.png" if args.useAgg else None
+                        )
 
                 # Finish plots
                 if not args.useAgg:
