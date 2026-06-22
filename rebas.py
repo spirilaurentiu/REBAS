@@ -1242,7 +1242,7 @@ def main(args):
             
             #endregion # extractors
 
-            DO_GEOMETRY, DO_PCA = True, True
+            DO_GEOMETRY, DO_PCA = False, True
 
             if DO_GEOMETRY:
 
@@ -1501,13 +1501,13 @@ def main(args):
                         s=0.5,
                     )
 
-                MSM_results_0, MSM_results_1 = FNManager.MSM(result, lag=1,  n_states=5, verbose=True)
+                MSM_typeIx_0, MSM_typeIx_1 = FNManager.MSM(result, lag=1,  n_states=5, verbose=True)
 
                 #all_repeats all_thermoIxs 
                 from utils import printNumpyND
 
                 # Iterate through the MSM results for each type
-                for mIx, MSM_result in enumerate(MSM_results_0):
+                for mIx, MSM_result in enumerate(MSM_typeIx_0):
                     typeIx, repeatIx, thermoIx = MSM_result["traj_info"]
                     print(f"Type 0 MSM counter {mIx} for trajectory with Type {types[typeIx]}, Repeat {repeats[repeatIx]}, Thermo {thermos[thermoIx]}")
                     #print("MSM assignments", MSM_result["assignments"])
@@ -1516,7 +1516,7 @@ def main(args):
                     printNumpyND("MSM stationary distribution", MSM_result["stationary_distribution"])
                     printNumpyND("MSM implied timescales", MSM_result["implied_timescales"])
                     printNumpyND("MSM cluster centers", MSM_result["cluster_centers"])
-                for mIx, MSM_result in enumerate(MSM_results_1):
+                for mIx, MSM_result in enumerate(MSM_typeIx_1):
                     typeIx, repeatIx, thermoIx = MSM_result["traj_info"]
                     print(f"Type 1 MSM counter {mIx} for trajectory with Type {types[typeIx]}, Repeat {repeats[repeatIx]}, Thermo {thermos[thermoIx]}")
                     #print("MSM assignments", MSM_result["assignments"])
@@ -1525,6 +1525,64 @@ def main(args):
                     printNumpyND("MSM stationary distribution", MSM_result["stationary_distribution"])
                     printNumpyND("MSM implied timescales", MSM_result["implied_timescales"])
                     printNumpyND("MSM cluster centers", MSM_result["cluster_centers"])
+
+
+                from collections import defaultdict
+
+                # --- 1. Average Type 0 by thermoIx ---
+                print("\n=== Averaged MSM Results for Type 0 by Thermodynamic Index ===")
+                grouped_type_0 = defaultdict(lambda: {
+                    "transition_matrices": [], "stationary_distributions": [], 
+                    "implied_timescales": [], "cluster_centers": []
+                })
+
+                for msm in MSM_typeIx_0:
+                    _, _, thermoIx = msm["traj_info"]
+                    grouped_type_0[thermoIx]["transition_matrices"].append(msm["transition_matrix"])
+                    grouped_type_0[thermoIx]["stationary_distributions"].append(msm["stationary_distribution"])
+                    grouped_type_0[thermoIx]["implied_timescales"].append(msm["implied_timescales"])
+                    grouped_type_0[thermoIx]["cluster_centers"].append(msm["cluster_centers"])
+
+                for thermoIx, metrics in grouped_type_0.items():
+                    print("-" * 60)
+                    print(f"Average MSM for Type 0 ({types[0]}) | Thermo Index: {thermos[thermoIx]} ({len(metrics['transition_matrices'])} repeats)")
+                    print("-" * 60)
+                    printNumpyND("Averaged Transition Matrix", np.mean(metrics["transition_matrices"], axis=0))
+                    printNumpyND("Averaged Stationary Distribution", np.mean(metrics["stationary_distributions"], axis=0))
+                    printNumpyND("Averaged Implied Timescales", np.mean(metrics["implied_timescales"], axis=0))
+                    printNumpyND("Averaged Cluster Centers", np.mean(metrics["cluster_centers"], axis=0))
+
+
+                # --- 2. Average Type 1 by thermoIx ---
+                print("\n=== Averaged MSM Results for Type 1 by Thermodynamic Index ===")
+                grouped_type_1 = defaultdict(lambda: {
+                    "transition_matrices": [], "stationary_distributions": [], 
+                    "implied_timescales": [], "cluster_centers": []
+                })
+
+                for msm in MSM_typeIx_1:
+                    _, _, thermoIx = msm["traj_info"]
+                    grouped_type_1[thermoIx]["transition_matrices"].append(msm["transition_matrix"])
+                    grouped_type_1[thermoIx]["stationary_distributions"].append(msm["stationary_distribution"])
+                    grouped_type_1[thermoIx]["implied_timescales"].append(msm["implied_timescales"])
+                    grouped_type_1[thermoIx]["cluster_centers"].append(msm["cluster_centers"])
+
+                for thermoIx, metrics in grouped_type_1.items():
+                    print("-" * 60)
+                    print(f"Average MSM for Type 1 ({types[1]}) | Thermo Index: {thermos[thermoIx]} ({len(metrics['transition_matrices'])} repeats)")
+                    print("-" * 60)
+                    printNumpyND("Averaged Transition Matrix", np.mean(metrics["transition_matrices"], axis=0))
+                    printNumpyND("Averaged Stationary Distribution", np.mean(metrics["stationary_distributions"], axis=0))
+                    printNumpyND("Averaged Implied Timescales", np.mean(metrics["implied_timescales"], axis=0))
+                    printNumpyND("Averaged Cluster Centers", np.mean(metrics["cluster_centers"], axis=0))
+
+
+
+
+
+
+
+
 
                 if not args.useAgg:
                     plt.show()

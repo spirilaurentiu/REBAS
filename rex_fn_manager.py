@@ -331,8 +331,105 @@ class REXFNManager:
         return (result, uniq_sorted_types, uniq_sorted_repeats, uniq_sorted_thermos)
     #
 
-    # Perform PCA on all trajectories combined and return PCA for each trajectory
+
+
+
+
+
+    # Gemini efficient PCA on all trajectories one by one
     def PCA(self, filters={}, frames=None, top="trpch/ligand.prmtop", verbose=False, **obs_kwargs):
+        """ Perform memory-efficient PCA on all trajectories one by one """
+        from sklearn.decomposition import IncrementalPCA
+        import mdtraj as md
+
+        ipca = IncrementalPCA(n_components=2, batch_size=5000)
+
+        if self.entries is None:
+            self.entries, (self.n_types, self.n_sims, self.n_reps) = self.prepareTrajArraySize(filters)
+
+        uniq_sorted_types = np.unique(self.entries[:, 0].astype(int))
+        uniq_sorted_repeats = np.unique(self.entries[:, 2].astype(int))
+        uniq_sorted_thermos = np.unique(self.entries[:, 3].astype(int))
+
+        # --- PASS 1: Get frame counts and find the minimum length safely ---
+        print("Pass 1: Checking trajectory lengths...", flush=True)
+        n_frames_list = []
+        valid_rows = []
+
+        for row in self.entries:
+            s_type, seed, repeatIx, thermoIx, FN = row
+            try:
+                # md.open lets us read the file header info without loading any coordinate arrays into RAM
+                with md.open(FN) as fObj:
+                    n_frames_list.append(len(fObj))
+                valid_rows.append(row)
+            except Exception as e:
+                print(f"  [SKIP] {os.path.basename(FN)}: {e}")
+
+        if not valid_rows:
+            return None
+
+        min_n_frames = min(n_frames_list)
+        print(f"Truncating all trajectories to minimum length: {min_n_frames} frames.\n", flush=True)
+
+        # Safely load just the very first frame (frame index 0) of the first valid file
+        ref_traj = md.load_dcd(valid_rows[0][4], top=top, frame=0)
+        selection = ref_traj.top.select("name CA")
+        ref_frame = ref_traj[0]
+
+        # --- PASS 2: Incremental PCA Fit (Load 1 trajectory at a time) ---
+        print("Pass 2: Partial Fitting PCA model ...", flush=True)
+        for row in valid_rows:
+            s_type, seed, repeatIx, thermoIx, FN = row
+            print(f"  Fitting {os.path.basename(FN)} ...", end=" ", flush=True)
+            
+            # Load, truncate, and force float32 immediately
+            traj = md.load_dcd(FN, top=top, stride=1)[:min_n_frames]
+            traj.xyz = traj.xyz.astype('float32')
+            
+            # Align to reference
+            traj.superpose(ref_frame, atom_indices=selection)
+            
+            # Prepare features and fit
+            X = traj.xyz[:, selection, :].reshape(traj.n_frames, -1)
+            ipca.partial_fit(X)
+            print("done.", flush=True)
+            
+            # Explicitly delete to clear RAM before next loop iteration
+            del traj, X
+
+        # --- PASS 3: Transform and project (Load 1 trajectory at a time) ---
+        print("\nPass 3: Transforming trajectories ...", flush=True)
+        result = []
+        for row in valid_rows:
+            s_type, seed, repeatIx, thermoIx, FN = row
+            print(f"  Transforming {os.path.basename(FN)} ...", end=" ", flush=True)
+            
+            traj = md.load_dcd(FN, top=top, stride=1)[:min_n_frames]
+            traj.xyz = traj.xyz.astype('float32')
+            traj.superpose(ref_frame, atom_indices=selection)
+            
+            X = traj.xyz[:, selection, :].reshape(traj.n_frames, -1)
+            proj = ipca.transform(X)
+
+            typeIx = np.searchsorted(uniq_sorted_types, int(s_type))
+            repeatIx = np.searchsorted(uniq_sorted_repeats, int(repeatIx))
+            thermoIx = np.searchsorted(uniq_sorted_thermos, int(thermoIx))
+            
+            result.append({
+                "traj_info": [typeIx, repeatIx, thermoIx],
+                "projection": proj,
+                "explained_variance": ipca.explained_variance_ratio_
+            })
+            print("done.", flush=True)
+            
+            del traj, X # Free memory
+
+        return (result, uniq_sorted_types, uniq_sorted_repeats, uniq_sorted_thermos)
+    #
+
+    # Perform PCA on all trajectories combined and return PCA for each trajectory
+    def PCA_killed(self, filters={}, frames=None, top="trpch/ligand.prmtop", verbose=False, **obs_kwargs):
         """ Perform PCA on all trajectories combined and return PCA for each trajectory """
         from sklearn.decomposition import IncrementalPCA
 
