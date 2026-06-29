@@ -1087,7 +1087,7 @@ def main(args):
 
             utilObj = REXFNManager()
 
-            GLOBAL_TRAJ_BURNIN = 10
+            GLOBAL_TRAJ_BURNIN = 10000
             GLOBAL_END = None
 
             # pick your frame slice once:
@@ -1242,7 +1242,7 @@ def main(args):
             
             #endregion # extractors
 
-            DO_GEOMETRY, DO_PCA = False, True
+            DO_GEOMETRY, DO_PCA = True, False
 
             if DO_GEOMETRY:
 
@@ -1290,15 +1290,18 @@ def main(args):
                 # Get standard deviation by observable ignoring type/repeat/thermo
                 obs_means = np.array([np.nanmean(observables[:,:,:,obsIx,:]) for obsIx in range(n_observables)])
                 obs_stds = np.array([np.nanstd(observables[:,:,:,obsIx,:]) for obsIx in range(n_observables)])
-
                 #endregion
 
+                # =============================================================
+                # OBSERVABLES Print and Plot
+                # =============================================================
+                # region Observables print and plot
                 replicaIx = 0
                 obsIx = 0
                 for simIx in range(n_repeats):
 
                     # Observables timeseries plots
-                    PRINT__, PLOT__ = True, False
+                    PRINT__, PLOT__ = False, False
                     if PRINT__:
                         print("Unique sim types:", uniq_types)
                         print("Unique repeats:", uniq_repeats)
@@ -1323,8 +1326,75 @@ def main(args):
                     
                         if args.useAgg:
                             plt.savefig(plotFN)
+                # endregion # Observables print and plot
 
-                # Cumulative mean and std
+                # =============================================================
+                # RUNNING MEAN and STD Calculate
+                # ============================================================= 
+                #region Running mean and std calculate
+                running_mean_obs = np.full_like(observables, fill_value=np.nan)
+                running_std_obs = np.full_like(observables, fill_value=np.nan)
+                running_window = 1000  # Define the window size for running mean and std
+                print("Nof types:", n_types, "Nof repeats:", n_repeats, "Nof thermos:", n_thermos, "Nof observables:", n_observables)
+
+                for typeIx in range(n_types):
+                    for repeatIx in range(n_repeats):
+                        for thermoIx in range(n_thermos):
+                            for obsIx in range(n_observables):
+                                obs = observables[typeIx, repeatIx, thermoIx, obsIx,:]
+                                running_mean = np.convolve(obs, np.ones(running_window)/running_window, mode='valid')
+                                running_std = np.array([np.std(obs[max(0, i-running_window+1):i+1]) for i in range(len(obs))])
+                                running_mean_obs[typeIx, repeatIx, thermoIx, obsIx,:len(running_mean)] = running_mean
+                                running_std_obs[typeIx, repeatIx, thermoIx, obsIx,:] = running_std
+
+                running_mean_min = np.nanmin(running_mean_obs)
+                running_mean_max = np.nanmax(running_mean_obs)
+                running_std_min = np.nanmin(running_std_obs)
+                running_std_max = np.nanmax(running_std_obs)
+                # endregion # Running mean and std calculate
+
+                # =============================================================
+                # RUNNING MEAN and STD Print and Plot
+                # ============================================================= 
+                #region Running mean and std print and plot
+                replicaIx = 0
+                obsIx = 0
+                for simIx in range(n_repeats):
+
+                    # Running mean and std plots
+                    PRINT__, PLOT__ = False, False
+                    if PRINT__:
+                        print("running_mean shape:", running_mean_obs.shape)
+                        print("running_std shape:", running_std_obs.shape)
+                    if PLOT__:
+                        ylim = (obs_means[obsIx] - (3.0 * obs_stds[obsIx]), obs_means[obsIx] + (3.0 * obs_stds[obsIx]))
+                        plot1D(
+                            Y=running_mean_obs[:, simIx, replicaIx, obsIx,:],
+                            #ylim=ylim,
+                            instantiateFigure=True,
+                            title=obs_title + " Running Mean",
+                            xlabel="Frame",
+                            ylabel=obs_name + " Running Mean",
+                            labels=[f"Repeat {simIx} Type {uniq_types[ix]} Thermo {replicaIx}" for ix in range(len(observables))],
+                            colors=[colorByType(uniq_types[ix]) for ix in range(len(observables))],
+                            save_path=f"traj_{obs_name}_running_mean.png" if args.useAgg else None
+                        )
+
+                        plot1D(
+                            Y=running_std_obs[:, simIx, replicaIx, obsIx,:],
+                            title=obs_title + " Running Std",
+                            xlabel="Frame",
+                            ylabel=obs_name + " Running Std",
+                            labels=[f"Repeat {simIx} Type {uniq_types[ix]} Thermo {replicaIx}" for ix in range(len(observables))],
+                            colors=[colorByType(uniq_types[ix]) for ix in range(len(observables))],
+                            save_path=f"traj_{obs_name}_running_std.png" if args.useAgg else None
+                        )
+                # endregion # Running mean and std print and plot
+                
+                # =============================================================
+                # CUMULATIVE MEAN and STD Calculate
+                # =============================================================
+                #region Cumulative mean and std calculate
                 cummean_obs = np.full_like(observables, fill_value=np.nan)
                 cumstd_obs = np.full_like(observables, fill_value=np.nan)
 
@@ -1340,14 +1410,21 @@ def main(args):
 
                 cummean_min = np.nanmin(cummean_obs)
                 cummean_max = np.nanmax(cummean_obs)
+                cumstd_min = np.nanmin(cumstd_obs)
+                cumstd_max = np.nanmax(cumstd_obs)
+                # endregion # Cumulative mean and std calculate
 
+                # =============================================================
+                # CUMULATIVE MEAN and STD Print and Plot
+                # =============================================================
+                #region Cumulative mean and std print and plot
+                PRINT__, PLOT__ = False, False
+                if PLOT__:
+                    plt.figure()
                 replicaIx = 0
-                obsIx = 0
-                plt.figure()
+                obsIx = 0                
                 for simIx in range(n_repeats):
 
-                    # Cumulative mean and std plots
-                    PRINT__, PLOT__ = True, True
                     if PRINT__:
                         print("cum_mean shape:", cummean_obs.shape)
                         print("cum_std shape:", cumstd_obs.shape)
@@ -1374,6 +1451,53 @@ def main(args):
                             colors=[colorByType(uniq_types[ix]) for ix in range(len(observables))],
                             save_path=f"traj_{obs_name}_cum_std.png" if args.useAgg else None
                         )
+                # endregion # Cumulative mean and std print and plot
+
+                # =============================================================
+                # AUTOCORRELATION FUNCTION (ACF) Calculate
+                # =============================================================
+                #region Autocorrelation function (ACF) calculate
+                max_lag = 20000
+
+                ACF_rhos = np.full((n_types, n_repeats, n_thermos, n_observables, max_lag), fill_value=np.nan)
+                for typeIx in range(n_types):
+                    for repeatIx in range(n_repeats):
+                        for thermoIx in range(n_thermos):
+                            for obsIx in range(n_observables):
+                                obs = observables[typeIx, repeatIx, thermoIx, obsIx,:]
+
+                                # Compute autocorrelation function
+                                (rho, obs_tau, ess) = stats.autocorr2_revised(obs, max_lag=max_lag)
+                                ACF_rhos[typeIx, repeatIx, thermoIx, obsIx, :len(rho)] = rho
+
+                                print(f"Type {uniq_types[typeIx]} Repeat {uniq_repeats[repeatIx]} Thermo {uniq_thermos[thermoIx]} Obs {obsIx}: tau_ac={obs_tau:.3f}, ESS={ess:.3f}")
+                # endregion # Autocorrelation function (ACF) calculate
+
+                # =============================================================
+                # AUTOCORRELATION FUNCTION (ACF) Print and Plot
+                # =============================================================
+                #region Autocorrelation function (ACF) print and plot
+                PRINT__, PLOT__ = False, False
+                if PRINT__:
+                    print("ACF_rhos shape:", ACF_rhos.shape)
+                if PLOT__:
+                    plt.figure()
+                    for typeIx in range(n_types):
+                        for repeatIx in range(n_repeats):
+                            for thermoIx in range(n_thermos):
+                                for obsIx in range(n_observables):
+                                    rhos = ACF_rhos[typeIx, repeatIx, thermoIx, obsIx,:]
+                                    plt.plot(rhos,
+                                             label=f"Type {uniq_types[typeIx]} Repeat {uniq_repeats[repeatIx]} Thermo {uniq_thermos[thermoIx]}",
+                                             color=colorByType(uniq_types[typeIx]))
+                    plt.title("Autocorrelation Function (ACF)")
+                    plt.xlabel("Lag")
+                    plt.ylabel("ACF")
+                    plt.legend()
+                    plt.tight_layout()
+                    if args.useAgg:
+                        plt.savefig(f"traj_{obs_name}_acf.png")
+                # endregion Autocorrelation function (ACF) print and plot
 
                 # Finish plots
                 if not args.useAgg:
@@ -1516,6 +1640,7 @@ def main(args):
                     printNumpyND("MSM stationary distribution", MSM_result["stationary_distribution"])
                     printNumpyND("MSM implied timescales", MSM_result["implied_timescales"])
                     printNumpyND("MSM cluster centers", MSM_result["cluster_centers"])
+                    printNumpyND("MSM MFPT matrix", MSM_result["mfpt_matrix"])
                 for mIx, MSM_result in enumerate(MSM_typeIx_1):
                     typeIx, repeatIx, thermoIx = MSM_result["traj_info"]
                     print(f"Type 1 MSM counter {mIx} for trajectory with Type {types[typeIx]}, Repeat {repeats[repeatIx]}, Thermo {thermos[thermoIx]}")
@@ -1525,6 +1650,7 @@ def main(args):
                     printNumpyND("MSM stationary distribution", MSM_result["stationary_distribution"])
                     printNumpyND("MSM implied timescales", MSM_result["implied_timescales"])
                     printNumpyND("MSM cluster centers", MSM_result["cluster_centers"])
+                    printNumpyND("MSM MFPT matrix", MSM_result["mfpt_matrix"])
 
 
                 from collections import defaultdict
@@ -1533,7 +1659,7 @@ def main(args):
                 print("\n=== Averaged MSM Results for Type 0 by Thermodynamic Index ===")
                 grouped_type_0 = defaultdict(lambda: {
                     "transition_matrices": [], "stationary_distributions": [], 
-                    "implied_timescales": [], "cluster_centers": []
+                    "implied_timescales": [], "mfpt_matrices": [], "cluster_centers": []
                 })
 
                 for msm in MSM_typeIx_0:
@@ -1541,6 +1667,7 @@ def main(args):
                     grouped_type_0[thermoIx]["transition_matrices"].append(msm["transition_matrix"])
                     grouped_type_0[thermoIx]["stationary_distributions"].append(msm["stationary_distribution"])
                     grouped_type_0[thermoIx]["implied_timescales"].append(msm["implied_timescales"])
+                    grouped_type_0[thermoIx]["mfpt_matrices"].append(msm["mfpt_matrix"])
                     grouped_type_0[thermoIx]["cluster_centers"].append(msm["cluster_centers"])
 
                 for thermoIx, metrics in grouped_type_0.items():
@@ -1550,6 +1677,7 @@ def main(args):
                     printNumpyND("Averaged Transition Matrix", np.mean(metrics["transition_matrices"], axis=0))
                     printNumpyND("Averaged Stationary Distribution", np.mean(metrics["stationary_distributions"], axis=0))
                     printNumpyND("Averaged Implied Timescales", np.mean(metrics["implied_timescales"], axis=0))
+                    printNumpyND("Averaged MFPT Matrix", np.mean(metrics["mfpt_matrices"], axis=0))
                     printNumpyND("Averaged Cluster Centers", np.mean(metrics["cluster_centers"], axis=0))
 
 
@@ -1557,7 +1685,7 @@ def main(args):
                 print("\n=== Averaged MSM Results for Type 1 by Thermodynamic Index ===")
                 grouped_type_1 = defaultdict(lambda: {
                     "transition_matrices": [], "stationary_distributions": [], 
-                    "implied_timescales": [], "cluster_centers": []
+                    "implied_timescales": [], "mfpt_matrices": [], "cluster_centers": []
                 })
 
                 for msm in MSM_typeIx_1:
@@ -1565,6 +1693,7 @@ def main(args):
                     grouped_type_1[thermoIx]["transition_matrices"].append(msm["transition_matrix"])
                     grouped_type_1[thermoIx]["stationary_distributions"].append(msm["stationary_distribution"])
                     grouped_type_1[thermoIx]["implied_timescales"].append(msm["implied_timescales"])
+                    grouped_type_1[thermoIx]["mfpt_matrices"].append(msm["mfpt_matrix"])
                     grouped_type_1[thermoIx]["cluster_centers"].append(msm["cluster_centers"])
 
                 for thermoIx, metrics in grouped_type_1.items():
@@ -1574,14 +1703,8 @@ def main(args):
                     printNumpyND("Averaged Transition Matrix", np.mean(metrics["transition_matrices"], axis=0))
                     printNumpyND("Averaged Stationary Distribution", np.mean(metrics["stationary_distributions"], axis=0))
                     printNumpyND("Averaged Implied Timescales", np.mean(metrics["implied_timescales"], axis=0))
+                    printNumpyND("Averaged MFPT Matrix", np.mean(metrics["mfpt_matrices"], axis=0))
                     printNumpyND("Averaged Cluster Centers", np.mean(metrics["cluster_centers"], axis=0))
-
-
-
-
-
-
-
 
 
                 if not args.useAgg:

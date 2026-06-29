@@ -274,7 +274,7 @@ class REXFNManager:
             s_type, seed, repeatIx, thermoIx, FN = row
 
             try:
-                print(f"Reading {FN} ...", end=" ", flush=True)
+                print(f"Reading {FN} ... frames", frames, end=" ", flush=True)
                 obs, meta = self.getTrajDataFromFile(
                     FN, seed, s_type, thermoIx, observable_func,
                     frames=frames,
@@ -330,11 +330,6 @@ class REXFNManager:
 
         return (result, uniq_sorted_types, uniq_sorted_repeats, uniq_sorted_thermos)
     #
-
-
-
-
-
 
     # Gemini efficient PCA on all trajectories one by one
     def PCA(self, filters={}, frames=None, top="trpch/ligand.prmtop", verbose=False, **obs_kwargs):
@@ -428,90 +423,55 @@ class REXFNManager:
         return (result, uniq_sorted_types, uniq_sorted_repeats, uniq_sorted_thermos)
     #
 
-    # Perform PCA on all trajectories combined and return PCA for each trajectory
-    def PCA_killed(self, filters={}, frames=None, top="trpch/ligand.prmtop", verbose=False, **obs_kwargs):
-        """ Perform PCA on all trajectories combined and return PCA for each trajectory """
-        from sklearn.decomposition import IncrementalPCA
-
-        ipca = IncrementalPCA(n_components=2, batch_size=5000)
-
-        # 1. Get metadata
-        if self.entries is None:
-            self.entries, (self.n_types, self.n_sims, self.n_reps) = self.prepareTrajArraySize(filters)
-
-        uniq_sorted_types = np.unique(self.entries[:, 0].astype(int))
-        uniq_sorted_repeats = np.unique(self.entries[:, 2].astype(int))
-        uniq_sorted_thermos = np.unique(self.entries[:, 3].astype(int))
-
-        # Load trajectories
-        valid_trajItraj = []
-        n_frames_list = []
-
-        for row in self.entries:
-            s_type, seed, repeatIx, thermoIx, FN = row
-
+    @staticmethod
+    def calculate_mfpt_matrix(T):
+        """
+        Calculates the complete Mean First Passage Time (MFPT) matrix.
+        
+        Parameters
+        ----------
+        T : numpy.ndarray, shape (n_states, n_states)
+            The row-normalized transition probability matrix.
+            
+        Returns
+        -------
+        MFPT : numpy.ndarray, shape (n_states, n_states)
+            Matrix where entry [i, j] is the mean step distance from state i to state j.
+        """
+        n_states = T.shape[0]
+        MFPT = np.zeros((n_states, n_states))
+        
+        # Identity matrix matching the system size
+        I = np.eye(n_states)
+        
+        # Calculate MFPT column by column (each target state j)
+        for j in range(n_states):
+            # Remove row j and column j from the transition matrix
+            # This implements the boundary condition that state j is an absorbing sink
+            rows = [r for r in range(n_states) if r != j]
+            
+            T_sub = T[np.ix_(rows, rows)]
+            I_sub = I[np.ix_(rows, rows)]
+            
+            # Solve the linear system: (I - T_sub) * X = 1
+            b = np.ones(n_states - 1)
             try:
-                print(f"Reading {FN} ...", end=" ", flush=True)
-                traj = md.load_dcd(FN, top=top, stride=1)
-
-                # Convert to float32 to save memory
-                traj.xyz = traj.xyz.astype('float32')
-
-                n_frames_list.append(traj.n_frames)
-
-                typeIx = np.searchsorted(uniq_sorted_types, int(s_type))
-                repeatIx = np.searchsorted(uniq_sorted_repeats, int(repeatIx))
-                thermoIx = np.searchsorted(uniq_sorted_thermos, int(thermoIx))
-
-                valid_trajItraj.append(([typeIx, repeatIx, thermoIx], traj))
-                print(f"{traj.n_frames} frames. Done.", flush=True)
-
-            except Exception as e:
-                print(f"  [SKIP] {os.path.basename(FN)}: {e}")
-
-        if not valid_trajItraj:
-            return None
-
-        # Truncate to minimum frames
-        min_n_frames = min(n_frames_list)
-        print(f"Truncating trajectories to {min_n_frames} frames ...", flush=True)
-        for ix, vr in enumerate(valid_trajItraj):
-            valid_trajItraj[ix] = (vr[0], vr[1][:min_n_frames])
-        print("done.", flush=True)
-
-        # Use CA selection from the reference trajectory
-        ref_traj = valid_trajItraj[0][1]
-        selection = ref_traj.top.select("name CA")
-        ref_frame = ref_traj[0]
-
-        # Superpose all trajectories to the reference
-        print("Superimposing trajectories ...", flush=True)
-        for traj_info, traj in valid_trajItraj:
-            traj.superpose(ref_frame, atom_indices=selection)
-        print("done.", flush=True)
-
-        # First pass: partial_fit
-        print("Partial Fitting PCA model ...", flush=True)
-        for traj_info, traj in valid_trajItraj:
-            X = traj.xyz[:, selection, :].reshape(traj.n_frames, -1)
-            ipca.partial_fit(X)
-        print("done.", flush=True)
-
-        # Second pass: transform
-        print("Transforming trajectories ...", flush=True)
-        result = []
-        for traj_info, traj in valid_trajItraj:
-            X = traj.xyz[:, selection, :].reshape(traj.n_frames, -1)
-            proj = ipca.transform(X)
-
-            result.append({
-                "traj_info": traj_info,
-                "projection": proj,
-                "explained_variance": ipca.explained_variance_ratio_
-            })
-        print("done.", flush=True)
-
-        return (result, uniq_sorted_types, uniq_sorted_repeats, uniq_sorted_thermos)
+                x = np.linalg.solve(I_sub - T_sub, b)
+                
+                # Insert the results back into the final matrix column
+                # Leaving entry MFPT[j, j] = 0
+                idx = 0
+                for r in range(n_states):
+                    if r != j:
+                        MFPT[r, j] = x[idx]
+                        idx += 1
+            except np.linalg.LinAlgError:
+                # Handle edge cases where sub-states are isolated or completely un-sampled
+                for r in range(n_states):
+                    if r != j:
+                        MFPT[r, j] = np.nan
+                        
+        return MFPT
     #
 
     # Build a Markov State Model using PCA
@@ -661,7 +621,14 @@ class REXFNManager:
             #endregion ---------------------------------------------------
 
             # ------------------------------------------------------------
-            # 6. Return MSM object
+            # NEW: 5b. Compute Mean First Passage Time (MFPT) Matrix
+            # ------------------------------------------------------------
+            if verbose:
+                print("Computing Mean First Passage Times (MFPT)...")
+            mfpt_current = self.calculate_mfpt_matrix(T_current)
+
+            # ------------------------------------------------------------
+            # 6. Return MSM object (Inject mfpt into dictionaries)
             # ------------------------------------------------------------
             if typeIx == 0:
                 MSM_results_0.append({
@@ -670,6 +637,7 @@ class REXFNManager:
                     "transition_matrix": T_current,
                     "stationary_distribution": pi_current,
                     "implied_timescales": its,
+                    "mfpt_matrix": mfpt_current,  # <-- Added
                     "cluster_centers": kmeans.cluster_centers_
                 })
             elif typeIx == 1:
@@ -679,6 +647,7 @@ class REXFNManager:
                     "transition_matrix": T_current,
                     "stationary_distribution": pi_current,
                     "implied_timescales": its,
+                    "mfpt_matrix": mfpt_current,  # <-- Added
                     "cluster_centers": kmeans.cluster_centers_
                 })
 
@@ -691,102 +660,6 @@ class REXFNManager:
             print("MSM construction complete.")
 
         return MSM_results_0, MSM_results_1
-    #
-
-    # Get trajectory data from all files. Deals with file globbing.
-    def getTrajDataFromAllFiles_Old(self, observable_func, *, filters={}, frames=None, **obs_kwargs):
-        """ Get trajectory data from all files
-        :param observable_fn: Observable function or key
-        :param frames: Frames to include
-        :param obs_kwargs: Additional arguments for observable function
-        :return: list of observable arrays and metadata containing:
-            - filepath
-            - n_frames
-            - n_atoms
-            - frames
-            - seed
-            - sim_type
-        """
-        
-        entries, (n_types, n_sims, n_replicas, n_obss, n_frames) = self.prepareTrajArraySize(filters)
-        print("n_types", n_types, "n_sims", n_sims, "n_replicas", n_replicas, "n_obss", n_obss, "n_frames", n_frames)
-        exit(2)
-
-        obsList = []
-        metadata_rows = []
-
-        for FNRoot in self.FNRoots:
-            pattern = os.path.join(self.dir, FNRoot + "*")
-            FN_matches = glob.glob(pattern)
-
-            # print("self.dir", self.dir, "FNRoot", FNRoot)
-            # print("pattern", pattern)
-            # print("FN_matches", FN_matches)
-
-            if not FN_matches:
-                print(f"Warning: No files found matching {FNRoot}*", file=sys.stderr)
-                continue
-
-            for FN in FN_matches:
-
-                try:
-                    seed, sim_type, thermo_index = self.get_Info_FromFN(os.path.basename(FN))
-                except ValueError as e:
-                    print(f"[SKIP] Bad filename: {FN} -> {e}", file=sys.stderr)
-                    continue
-
-                # print("seed", "sim_type", "thermo_index", seed, sim_type, thermo_index)
-                # for col, val in filters.items():
-                #     print("filters:", "col", "val", col, val)
-
-                # Apply filters (if any)
-                FN_eligible = True
-                for col, val in filters.items():
-                    if col == "seed":
-                        # Check if seed matches scalar OR is inside the list of allowed values
-                        if isinstance(val, list):
-                            if seed not in val:
-                                FN_eligible = False
-                        elif seed != val:
-                            FN_eligible = False
-
-                    elif col == "sim_type":
-                        if isinstance(val, list):
-                            if sim_type not in val:
-                                FN_eligible = False
-                        elif sim_type != val:
-                            FN_eligible = False
-
-                    elif col == "thermoIx":
-                        current_thermo = int(thermo_index)
-                        if isinstance(val, list):
-                            if current_thermo not in val:
-                                FN_eligible = False
-                        elif current_thermo != val:
-                            FN_eligible = False
-
-                if not FN_eligible:
-                    #print("File NOT eligible")
-                    continue
-
-                print(f"Reading {FN} ...", end=" ", flush=True)
-                try:
-                    obs, meta = self.getTrajDataFromFile(
-                        FN, seed, sim_type, thermo_index,
-                        observable_func,
-                        frames=frames,
-                        **obs_kwargs
-                    )
-                except Exception as e:
-                    print(f"[FAIL] Error reading {FN}: {e}", file=sys.stderr)
-                    continue
-
-                obsList.append(obs)
-                metadata_rows.append(meta)
-                print("done.")
-
-        metadata_df = pd.DataFrame(metadata_rows)
-        return obsList, metadata_df
     #
     
     # Write restart files into self.dir/restDir/restDir.<seed>
@@ -891,4 +764,5 @@ class REXFNManager:
             except Exception as e:
                 print(f"Error processing {traj}: {e}", file=sys.stderr)
     #
+
 #endregion --------------------------------------------------------------------
