@@ -1242,7 +1242,7 @@ def main(args):
             
             #endregion # extractors
 
-            DO_GEOMETRY, DO_PCA = True, False
+            DO_GEOMETRY, DO_PCA = False, True
 
             if DO_GEOMETRY:
 
@@ -1470,7 +1470,7 @@ def main(args):
                                 (rho, obs_tau, ess) = stats.autocorr2_revised(obs, max_lag=max_lag)
                                 ACF_rhos[typeIx, repeatIx, thermoIx, obsIx, :len(rho)] = rho
 
-                                print(f"Type {uniq_types[typeIx]} Repeat {uniq_repeats[repeatIx]} Thermo {uniq_thermos[thermoIx]} Obs {obsIx}: tau_ac={obs_tau:.3f}, ESS={ess:.3f}")
+                                #print(f"Type {uniq_types[typeIx]} Repeat {uniq_repeats[repeatIx]} Thermo {uniq_thermos[thermoIx]} Obs {obsIx}: tau_ac={obs_tau:.3f}, ESS={ess:.3f}")
                 # endregion # Autocorrelation function (ACF) calculate
 
                 # =============================================================
@@ -1506,7 +1506,7 @@ def main(args):
 
             if DO_PCA:
 
-                # Principal component analysis (PCA)
+                # Principal component analysis (PCA) = linear combination of coords with highest variance
                 from sklearn.decomposition import PCA
                 (result, types, repeats, thermos) = \
                 FNManager.PCA(filters=filters, frames=frames, verbose=True)
@@ -1625,7 +1625,7 @@ def main(args):
                         s=0.5,
                     )
 
-                MSM_typeIx_0, MSM_typeIx_1 = FNManager.MSM(result, lag=1,  n_states=5, verbose=True)
+                MSM_typeIx_0, MSM_typeIx_1 = FNManager.MSM(result, lag=1,  n_states=10, verbose=True)
 
                 #all_repeats all_thermoIxs 
                 from utils import printNumpyND

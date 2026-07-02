@@ -197,6 +197,7 @@ class REXFNManager:
                     FN_basename = os.path.basename(FN)
                     seed, sim_type, thermo_index = self.get_Info_FromFN(FN_basename)
                     repeatIx = int(seed) % 100
+
                 except ValueError as e:
                     print(f"[SKIP] Bad filename: {FN} -> {e}", file=sys.stderr)
                     continue
@@ -204,9 +205,11 @@ class REXFNManager:
                 # Apply filters
                 FN_eligible = True
                 for col, val in filters.items():
-                    current_val = {"seed": seed,
-                                   "sim_type": sim_type,
-                                   "thermoIx": int(thermo_index)}.get(col)
+                    current_val = {"seed": int(seed),
+                                   "sim_type": int(sim_type),
+                                   "thermoIx": int(thermo_index)
+                                   }.get(col)
+
                     if val is not None:
                         if isinstance(val, list):
                             if current_val not in val:
@@ -385,8 +388,10 @@ class REXFNManager:
             # Align to reference
             traj.superpose(ref_frame, atom_indices=selection)
             
-            # Prepare features and fit
+            # Prepare: standard 2D PCA feature matrix: rows = frames, columns = x,y,z coords
             X = traj.xyz[:, selection, :].reshape(traj.n_frames, -1)
+
+            # Fit: find the principal components (linear combination of coords with highest variance)
             ipca.partial_fit(X)
             print("done.", flush=True)
             
