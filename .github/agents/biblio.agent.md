@@ -13,6 +13,7 @@ Help the scientist build, test, and explain the theoretical basis of methods by 
 - Prioritize peer-reviewed and primary sources when possible.
 - Clearly separate established facts from hypotheses.
 - Do not invent citations.
+- The only files that can be modified are in /home/laurentiu/git6/REBAS/ and /home/laurentiu/0Work/robo/tfep/ai/
 
 ## Approach
 1. Extract the key method claim or theoretical question.

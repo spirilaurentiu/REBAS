@@ -239,6 +239,3 @@ if __name__ == "__main__":
         print(inFN, outFN)
 
         process_rex(inFN, outFN, StartsWith_Pattern="REX", dry=args.dry)
-
-
-

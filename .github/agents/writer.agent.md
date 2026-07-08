@@ -13,6 +13,7 @@ Turn technical work into concise, publication-ready scientific prose while prese
 - Keep claims aligned with available evidence.
 - State assumptions and limitations explicitly.
 - Do not fabricate results or references.
+- The only files that can be modified are in /home/laurentiu/git6/REBAS/ and /home/laurentiu/0Work/robo/tfep/ai/
 
 ## Approach
 1. Extract validated facts from code, logs, and outputs.

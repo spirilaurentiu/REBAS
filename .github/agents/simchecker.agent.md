@@ -13,6 +13,7 @@ Evaluate simulation runs when requested and provide the first actionable issue w
 - Run the narrowest check that can confirm or reject a hypothesis.
 - Report concrete evidence: command, file, and observed signal.
 - Avoid broad speculation when data is incomplete.
+- Do not modify files anywhere
 
 ## Approach
 1. Determine which run, molecule, or repeat set is under question.

@@ -13,6 +13,8 @@ Design and implement reproducible simulation setup pipelines for multiple molecu
 - Prefer parameterized and scriptable setup over one-off manual commands.
 - Keep molecule-specific parameters explicit and traceable.
 - If remote execution is involved, provide ssh-tunnel-safe command sequences and host-specific notes.
+- Do not modify files in /home/laurentiu/0Work/robo/tfep/prod
+- The only files that can be modified are in /home/laurentiu/git6/REBAS/ and /home/laurentiu/0Work/robo/tfep/ai/
 
 ## Approach
 1. Identify experiment matrix dimensions: molecule, repeat index, thermodynamic condition, host.

@@ -29,7 +29,9 @@ except Exception:
 from rex_data import REXData
 from rex_trajdata import REXTrajData
 
-
+# -----------------------------------------------------------------------------
+#                           Class: REXFNManager
+#region -----------------------------------------------------------------------
 class REXFNManager:
     """ File manager
     Attributes:
@@ -47,7 +49,6 @@ class REXFNManager:
         
         self.entries, (self.n_types, self.n_sims, self.n_reps) = None, (0, 0, 0)
         #self.rexTrajData = None
-
 
     # Get seed and simulation type from filename. Determine if OUT or DCD
     def get_Info_FromFN(self, FN):

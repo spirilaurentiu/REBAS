@@ -269,30 +269,157 @@ class LS_Statistics:
         return tau_est
     #
 
-    # Autocorrelation manual loop
-    def autocorr2_revised(self, data, lag_fraction=0.1, max_lag=5000):
+    # Clean an array-like of infs and nans
+    def _sanitize_timeseries(self, data):
+        """Return finite samples and their original indices."""
+        arr = np.asarray(data, dtype=float).reshape(-1)
+        finite_mask = np.isfinite(arr)
+        clean = arr[finite_mask]
+        clean_indices = np.nonzero(finite_mask)[0]
+        return clean, clean_indices
+    #
+
+    # Detect equilibration using Chodera's method
+    def _detect_equilibration_chodera(self, clean_data, lag_fraction=0.1, max_lag=5000):
+        """Detect equilibration by maximizing effective uncorrelated samples over t0.
+
+        This mirrors Chodera's criterion: choose t0 that maximizes N_eff(t0) = N_t / g_t,
+        where g_t is the statistical inefficiency estimated from the post-t0 segment.
+        """
+        n = len(clean_data)
+        if n < 5:
+            return {
+                "detected": False,
+                "t0_clean": 0,
+                "t0_original": 0,
+                "g": np.nan,
+                "Neff_max": np.nan,
+                "n_clean": n,
+                "scan_step": 1,
+                "reason": "insufficient_clean_samples"
+            }
+
+        # Limit search density for long trajectories to avoid O(N^2) scans.
+        scan_step = max(1, n // 200)
+        t0_candidates = np.arange(0, n - 3, scan_step, dtype=int)
+        if t0_candidates.size == 0 or t0_candidates[-1] != (n - 4):
+            t0_candidates = np.append(t0_candidates, n - 4)
+
+        best = {
+            "t0_clean": 0,
+            "g": np.nan,
+            "Neff_max": -np.inf,
+            "detected": False
+        }
+
+        for t0 in t0_candidates:
+            seg = clean_data[t0:]
+            seg_n = len(seg)
+            if seg_n < 4:
+                continue
+
+            seg_var = np.var(seg)
+            if not np.isfinite(seg_var) or seg_var <= 0:
+                continue
+
+            seg_max_lag = self.get_num_lags(seg_n, lag_fraction, max_lag)
+            if seg_max_lag < 2:
+                continue
+
+            seg_x = seg - np.mean(seg)
+            seg_acf = np.array([
+                np.sum(seg_x[lag:] * seg_x[:seg_n-lag]) / (seg_n * seg_var)
+                for lag in range(seg_max_lag)
+            ])
+
+            tau_seg = self.getTau(seg_acf)
+            if not np.isfinite(tau_seg) or tau_seg <= 0:
+                continue
+
+            # Statistical inefficiency g is approximately tau for this estimator.
+            g_seg = max(1.0, float(tau_seg))
+            neff_seg = seg_n / g_seg
+
+            if neff_seg > best["Neff_max"]:
+                best = {
+                    "t0_clean": int(t0),
+                    "g": g_seg,
+                    "Neff_max": float(neff_seg),
+                    "detected": True
+                }
+
+        return {
+            "detected": bool(best["detected"]),
+            "t0_clean": int(best["t0_clean"]),
+            "t0_original": int(best["t0_clean"]),
+            "g": float(best["g"]) if np.isfinite(best["g"]) else np.nan,
+            "Neff_max": float(best["Neff_max"]) if np.isfinite(best["Neff_max"]) else np.nan,
+            "n_clean": n,
+            "scan_step": int(scan_step),
+            "reason": "ok" if best["detected"] else "fallback_to_t0_0"
+        }
+    #
+
+    # Autocorrelation manual loop (UNREVISED)
+    def autocorr2_revised(self, data, lag_fraction=0.1, max_lag=5000, detect_equilibration=False):
         """ Manual: Loop-based (Slow for large max_lag)
         """
-        N = len(data)
-        #print(f"Data length (N): {N}") # Debug: print the length of the data
-        #print(f"Data sample (first 10 values): {data[:10]}") # Debug: print the first 10 values of the data
-        miu = np.nanmean(data)
-        #print(f"Mean (miu): {miu}") # Debug: print the mean
-        xp = data - miu
-        var = np.nanvar(data)
-        #print(f"Variance: {var}") # Debug: print the variance
+        clean_data, clean_indices = self._sanitize_timeseries(data)
+        N_clean = len(clean_data)
 
-        if var == 0:
-            print(f"Variance of data is zero; autocorrelation undefined.")
+        # Backward-compatible metadata side-channel.
+        self.last_autocorr2_meta = {
+            "detect_equilibration": bool(detect_equilibration),
+            "n_input": len(np.asarray(data).reshape(-1)),
+            "n_clean": N_clean,
+            "nan_or_inf_dropped": int(len(np.asarray(data).reshape(-1)) - N_clean),
+            "equilibration": None
+        }
+
+        if N_clean == 0:
+            print("No finite samples; autocorrelation undefined.")
+            return (np.array([np.nan]), np.nan, np.nan)
+
+        t0_clean = 0
+        if detect_equilibration:
+            eq_meta = self._detect_equilibration_chodera(clean_data, lag_fraction=lag_fraction, max_lag=max_lag)
+            t0_clean = int(eq_meta["t0_clean"])
+            if clean_indices.size > t0_clean:
+                eq_meta["t0_original"] = int(clean_indices[t0_clean])
+            self.last_autocorr2_meta["equilibration"] = eq_meta
+
+        work_data = clean_data[t0_clean:]
+        N = len(work_data)
+
+        if N < 2:
+            print("Not enough post-equilibration samples; autocorrelation undefined.")
+            return (np.array([np.nan]), np.nan, np.nan)
+
+        miu = np.mean(work_data)
+        xp = work_data - miu
+        var = np.var(work_data)
+
+        if not np.isfinite(var) or var <= 0:
+            print("Variance of data is zero; autocorrelation undefined.")
             return (np.full(N, np.nan), np.nan, np.nan)
-        
+
         max_lag = self.get_num_lags(N, lag_fraction, max_lag)
-        
-        # Calculate ACF up to num_lags
-        ACF_rho = np.array([np.sum(xp[lag:] * xp[:N-lag]) / (N * var) for lag in range(max_lag)])
-        
+        if max_lag < 1:
+            return (np.array([1.0]), 1.0, float(N))
+
+        # Calculate ACF up to num_lags for finite, optionally post-equilibration data.
+        ACF_rho = np.array([
+            np.sum(xp[lag:] * xp[:N-lag]) / (N * var)
+            for lag in range(max_lag)
+        ])
+
         tau = self.getTau(ACF_rho)
-        ess = N / tau
+        ess = N / tau if np.isfinite(tau) and tau > 0 else np.nan
+
+        if detect_equilibration and self.last_autocorr2_meta["equilibration"] is not None:
+            self.last_autocorr2_meta["equilibration"]["n_production"] = int(N)
+            self.last_autocorr2_meta["equilibration"]["tau_production"] = float(tau) if np.isfinite(tau) else np.nan
+            self.last_autocorr2_meta["equilibration"]["ess_production"] = float(ess) if np.isfinite(ess) else np.nan
 
         return (ACF_rho, tau, ess)
     #

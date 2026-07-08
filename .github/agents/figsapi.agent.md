@@ -13,6 +13,8 @@ Help build clear, reproducible visual outputs from simulation and analysis data.
 - Keep plotting code reproducible from command line inputs.
 - Preserve scientific units, labels, and provenance in figure outputs.
 - Avoid cosmetic changes that obscure scientific interpretation.
+- Do not modify files in /home/laurentiu/0Work/robo/tfep/prod
+- The only files that can be modified are in /home/laurentiu/git6/REBAS/ and /home/laurentiu/0Work/robo/tfep/ai/
 
 ## Approach
 1. Locate the plotting path and data inputs.

@@ -24,6 +24,7 @@ from rex_efficiency import RoboAnalysis, REXEfficiency
 from rex_trajdata import REXTrajData
 
 from rex_fn_manager import REXFNManager
+from observables import Observables
 
 import MDAnalysis as mda
 #from MDAnalysis.coordinates.TRJ import Restart
@@ -410,6 +411,9 @@ def main(args):
             sys.exit()
         #endregion
 
+        # -----------------------------------------------------------------------------
+        # Read output from all files
+        # -----------------------------------------------------------------------------
         #region Read output from all files
         if args.useCache and os.path.exists(args.outCacheFile):
             print(f"Loading data from cache: {args.outCacheFile}")
@@ -1082,181 +1086,49 @@ def main(args):
         #     plt.close()
         #endregion
 
-        # Objective: Statistics from any observable from trajectories
-        if "traj_stats" in args.figures:
+        GLOBAL_TRAJ_BURNIN = args.trajBurnin
+        GLOBAL_END = None
 
-            utilObj = REXFNManager()
+        # pick your frame slice once:
+        frames = slice(GLOBAL_TRAJ_BURNIN, GLOBAL_END)   # or slice(GLOBAL_BURNIN, None)
 
-            GLOBAL_TRAJ_BURNIN = 10000
-            GLOBAL_END = None
+        FNManager = REXFNManager(args.dir, args.inFNRoots, args.cols, topology=args.topology)
+        FNManager.prepareTrajArraySize(filters=filters)
 
-            # pick your frame slice once:
-            frames = slice(GLOBAL_TRAJ_BURNIN, GLOBAL_END)   # or slice(GLOBAL_BURNIN, None)
-
-            FNManager = REXFNManager(args.dir, args.inFNRoots, args.cols, topology=args.topology)
-            FNManager.prepareTrajArraySize(filters=filters)
-
-            #region Extractor functions for trajectory observables
+        # Statistics from any observable from trajectories
+        if "traj_stats_1D" in args.figures:
             
-            # Distances
-            def distances(traj, pairs=[[8, 298], [100, 200]]):
-                """ Calculate distances between multiple pairs. """
-                result = md.compute_distances(traj, pairs)
-                return result.T
-
-            # Dihedral
-            def dihedral_a1_a2_a3_a4(traj, a1=4, a2=6, a3=8, a4=14):
-                """ Calculate dihedral angle defined by four atoms across all frames. """
-                result = md.compute_dihedrals(traj, [[a1, a2, a3, a4]])
-
-                return result.T
-
-            def dihedral_adj_a1_a2_a3_a4_a5(traj, a1=4, a2=6, a3=8, a4=14, a5=16):
-                dihedrals = md.compute_dihedrals(traj, [[a1, a2, a3, a4], [a2, a3, a4, a5]])
-                return (1 - np.cos(dihedrals[:, 0] - dihedrals[:, 1]))
-
-            def quaternion_multiply(q1, q2):
-                """Vectorized quaternion multiplication."""
-                w1, x1, y1, z1 = q1[:,0], q1[:,1], q1[:,2], q1[:,3]
-                w2, x2, y2, z2 = q2[:,0], q2[:,1], q2[:,2], q2[:,3]
-                
-                res = np.array([
-                    w1*w2 - x1*x2 - y1*y2 - z1*z2,
-                    w1*x2 + x1*w2 + y1*z2 - z1*y2,
-                    w1*y2 - x1*z2 + y1*w2 + z1*x2,
-                    w1*z2 + x1*y2 - y1*x2 + z1*w2
-                ]).T
-                return res
-            
-            def dihedral_quat_a1_a2_a3_a4_a5(traj, a1=4, a2=6, a3=8, a4=14, a5=16):
-                """ """
-                phi = md.compute_dihedrals(traj, [[a1, a2, a3, a4]])
-                psi = md.compute_dihedrals(traj, [[a2, a3, a4, a5]])
-                q_phi = np.stack([np.cos(phi/2), np.sin(phi/2), np.zeros_like(phi), np.zeros_like(phi)], axis=-1)
-                q_psi = np.stack([np.cos(psi/2), np.zeros_like(psi), np.sin(psi/2), np.zeros_like(psi)], axis=-1)
-                #combined_q = quaternion_multiply(q_phi, q_psi)
-                inner_q = np.dot(q_phi, q_psi)
-    
-                return inner_q
-
-            def dihedral_phi_psi(traj, phi_psi="psi", resid=0):
-                """  Calculate phi or psi for a given residue index. """
-                mdtraj_result = None
-                if phi_psi == "phi":
-                    mdtraj_result = md.compute_phi(traj, periodic=False)
-                elif phi_psi == "psi":
-                    mdtraj_result = md.compute_psi(traj, periodic=False)
-                else:
-                    raise ValueError(f"Invalid phi_psi value: {phi_psi}. Must be 'phi' or 'psi'.")
-                
-                atom_indices = mdtraj_result[0] # shape (n_residues, 4)
-                #print("atom_indices", atom_indices[resid, :])
-
-                torsions_all = mdtraj_result[1] # shape (n_frames, n_residues)
-                
-                # Validate residue index
-                if resid >= torsions_all.shape[1] or resid < 0:
-                    raise ValueError(f"Invalid resid {resid}. Must be between 0 and {torsions_all.shape[1]-1}")
-                
-                torsions = torsions_all[:, resid].ravel()
-                #torsions = np.where(torsions < -2.0, (torsions + 2.0) + (torsions * np.pi), torsions)
-                #print(f"First 10 {phi_psi} values for residue {resid}: {torsions[:10]} radians")
-
-                from batana import BATStats
-                batStats = BATStats()
-                torsions_mean = batStats.dihedralMean(torsions)
-                torsions_var = batStats.dihedralVar(torsions) # technically a dimensionless ratio between 0 and 1. It isn't squared radians.
-                torsions_std = batStats.dihedralStd(torsions)
-                print(f"\nMean {phi_psi} for residue {resid}: {torsions_mean:.3f} radians ({np.rad2deg(torsions_mean):.1f} degrees)")
-                #print(f"Var {phi_psi} for residue {resid}: {torsions_var:.3f} radians ({np.rad2deg(torsions_var):.1f} degrees)")
-                print(f"Std {phi_psi} for residue {resid}: {torsions_std:.3f} radians ({np.rad2deg(torsions_std):.1f} degrees)")
-
-                return torsions
-
-            ALA1_BASINS = {
-                "C5":       {"phi_min": np.deg2rad(-180), "phi_max": np.deg2rad(-95), "psi_min": np.deg2rad(105 ), "psi_max": np.deg2rad(180)},
-                "PPII":     {"phi_min": np.deg2rad(-96 ), "phi_max": np.deg2rad(-45), "psi_min": np.deg2rad(105 ), "psi_max": np.deg2rad(180)},
-                "C7_eq":    {"phi_min": np.deg2rad(-96 ), "phi_max": np.deg2rad(-45), "psi_min": np.deg2rad(-25 ), "psi_max": np.deg2rad(104)},
-                "alpha_eq": {"phi_min": np.deg2rad( 35 ), "phi_max": np.deg2rad( 85), "psi_min": np.deg2rad(-180), "psi_max": np.deg2rad(25)}
-            }
-
-            def ala_PMF_indicator(traj, a1=4, a2=6, a3=8, a4=14, a5=16):
-                # 1. Compute dihedrals for all frames
-                phi = md.compute_dihedrals(traj, [[a1, a2, a3, a4]]).ravel()
-                psi = md.compute_dihedrals(traj, [[a2, a3, a4, a5]]).ravel()
-                
-                # 2. Define the Boolean Masks for each state
-                # C5, PPII, and C7_eq all map to 0
-                is_c5 = (phi >= np.deg2rad(-180)) & (phi <= np.deg2rad(-95)) & \
-                        (psi >= np.deg2rad(105))  & (psi <= np.deg2rad(180))
-                        
-                is_ppii = (phi >= np.deg2rad(-96)) & (phi <= np.deg2rad(-45)) & \
-                        (psi >= np.deg2rad(105)) & (psi <= np.deg2rad(180))
-                        
-                is_c7eq = (phi >= np.deg2rad(-96)) & (phi <= np.deg2rad(-45)) & \
-                        (psi >= np.deg2rad(-25)) & (psi <= np.deg2rad(104))
-                        
-                # alpha_eq maps to 1
-                is_alpha = (phi >= np.deg2rad(35)) & (phi <= np.deg2rad(85)) & \
-                        (psi >= np.deg2rad(-180)) & (psi <= np.deg2rad(25))
-
-                # 3. Combine "0" states
-                state_zero_mask = is_c5 | is_ppii | is_c7eq
-                
-                # 4. Use np.select to assign values
-                # Logic: If in state_zero_mask -> 0.0
-                #        Else if in is_alpha -> 1.0
-                #        Else (default) -> 0.5
-                conditions = [state_zero_mask, is_alpha]
-                choices = [0.0, 1.0]
-                
-                states = np.select(conditions, choices, default=0.5)
-                
-                return states
-
-            TRPCH_BASINS = {
-                "basin1": {"psi_min": -1.5, "psi_max": 0.5, "ee_dist_min": 0.0, "ee_dist_max": 1.27},
-                "basin2": {"psi_min": -1.5, "psi_max": 0.5, "ee_dist_min": 1.27, "ee_dist_max": 5.0},
-                "basin3": {"psi_min":  2.0, "psi_max": 3.0, "ee_dist_min": 0.0, "ee_dist_max": 1.27},
-                "basin4": {"psi_min":  2.0, "psi_max": 3.0, "ee_dist_min": 1.27, "ee_dist_max": 5.0},
-            }
-
-            def trpch_PMF_indicator(traj, phi_psi="psi", resid=0):
-                psi = dihedral_phi_psi(traj, phi_psi=phi_psi, resid=resid)
-                ee_dist = dist_atom1_atom2(traj, a1=8, a2=298)
-
-                psi_range1 = (psi >= -1.5) & (psi <= 0.5)
-                psi_range2 = (psi >= 2.0) & (psi <= 3.0)
-                dist_short = (ee_dist <= 1.27)
-                dist_long  = (ee_dist > 1.27) & (ee_dist <= 5.0)
-
-                is_basin1 = psi_range1 & dist_short
-                is_basin2 = psi_range1 & dist_long
-                is_basin3 = psi_range2 & dist_short
-                is_basin4 = psi_range2 & dist_long
-
-                conditions = [is_basin1, is_basin2, is_basin3, is_basin4]
-                choices = [0.0, 0.25, 0.5, 0.75]
-                states = np.select(conditions, choices, default=1.0)
-                return states
-            
-            #endregion # extractors
-
-            DO_GEOMETRY, DO_PCA = False, True
+            DO_GEOMETRY, DO_PCA = True, False
 
             if DO_GEOMETRY:
 
-                # Get trajectory data 
-                obs_name = distances.__name__
-                obs_title = "End-to-End Distance"
+                # Get trajectory data
+                if args.moleculeName not in args.dir:
+                    print(f"Error: moleculeName '{args.moleculeName}' not found in directory path '{args.dir}'.")
+                    exit(1)
+
+                obs_func, obs_func_args, obs_name, obs_title = None, {}, "", ""
+
+                if args.moleculeName == "trpch":
+                    obs_func = Observables.distances
+                    obs_func_args = {"pairs": [[8, 298]]}
+                    obs_name = Observables.distances.__name__
+                    obs_title = "End-to-End Distance"
+
+                elif args.moleculeName == "ala1":
+                    obs_func = Observables.dihedral_a1_a2_a3_a4
+                    obs_func_args = {"a1":4, "a2":6, "a3":8, "a4":14}
+                    obs_name = Observables.dihedral_a1_a2_a3_a4.__name__
+                    obs_title = "Dihedral Angle (4,6,8,14)"
+
                 #obs_title = "Trp-Cage PMF Indicator"
                 #(result, uniq_sorted_types, uniq_sorted_repeats, uniq_sorted_thermos)
 
                 (observables, uniq_types, uniq_repeats, uniq_thermos) = FNManager.getTrajDataFromAllFiles(
-                    distances,
+                    obs_func,
                     filters=filters,
                     frames=frames,
-                    pairs=[[8, 298]],
+                    **obs_func_args,
                     #phi_psi="psi",  # optional; only for dihedral_phi_psi
                     #resid=11,       # optional; only for dihedral_phi_psi
                     verbose=False
@@ -1301,7 +1173,7 @@ def main(args):
                 for simIx in range(n_repeats):
 
                     # Observables timeseries plots
-                    PRINT__, PLOT__ = False, False
+                    PRINT__, PLOT__ = True, False
                     if PRINT__:
                         print("Unique sim types:", uniq_types)
                         print("Unique repeats:", uniq_repeats)
@@ -1419,8 +1291,8 @@ def main(args):
                 # =============================================================
                 #region Cumulative mean and std print and plot
                 PRINT__, PLOT__ = False, False
-                if PLOT__:
-                    plt.figure()
+                #if PLOT__:
+                #    plt.figure()
                 replicaIx = 0
                 obsIx = 0                
                 for simIx in range(n_repeats):
@@ -1430,6 +1302,8 @@ def main(args):
                         print("cum_std shape:", cumstd_obs.shape)
                     if PLOT__:
                         ylim = (obs_means[obsIx] - (2.0 * obs_stds[obsIx]), obs_means[obsIx] + (2.0 * obs_stds[obsIx]))
+
+                        plt.figure()
                         plot1D(
                             Y=cummean_obs[:, simIx, replicaIx, obsIx,:],
                             ylim=ylim,
@@ -1442,8 +1316,10 @@ def main(args):
                             save_path=f"traj_{obs_name}_cum_mean.png" if args.useAgg else None
                         )
 
+                        plt.figure()
                         plot1D(
                             Y=cumstd_obs[:, simIx, replicaIx, obsIx,:],
+                            instantiateFigure=False,
                             title=obs_title + " Cumulative Std",
                             xlabel="Frame",
                             ylabel=obs_name + " Cumulative Std",
@@ -1477,7 +1353,7 @@ def main(args):
                 # AUTOCORRELATION FUNCTION (ACF) Print and Plot
                 # =============================================================
                 #region Autocorrelation function (ACF) print and plot
-                PRINT__, PLOT__ = False, False
+                PRINT__, PLOT__ = False, True
                 if PRINT__:
                     print("ACF_rhos shape:", ACF_rhos.shape)
                 if PLOT__:
@@ -1712,6 +1588,114 @@ def main(args):
                 plt.close()
 
 
+        if "traj_stats_2D" in args.figures:
+
+            # 2D histogram of two observables
+            obs_func1, obs_func_args1, obs_name1, obs_title1 = None, {}, "", ""
+            obs_func2, obs_func_args2, obs_name2, obs_title2 = None, {}, "", ""
+
+            if args.moleculeName == "trpch":
+                obs_func1 = Observables.distances
+                obs_func_args1 = {"pairs": [[8, 298]]}
+                obs_func2 = Observables.dihedral_phi_psi
+                obs_func_args2 = {"phi_psi": "phi", "resid": 11}
+
+                obs_name = Observables.distances.__name__ + "_" + Observables.dihedral_phi_psi.__name__
+                obs_title = "2D"
+
+            elif args.moleculeName == "ala1":
+                obs_func1 = Observables.dihedral_a1_a2_a3_a4
+                obs_func_args1 = {"a1":4, "a2":6, "a3":8, "a4":14}
+                obs_func2 = Observables.dihedral_a1_a2_a3_a4
+                obs_func_args2 = {"a1":6, "a2":8, "a3":14, "a4":16}
+
+                obs_name = Observables.dihedral_a1_a2_a3_a4.__name__ + "_" + Observables.dihedral_a1_a2_a3_a4.__name__
+                obs_title = "2D"
+
+            (observables1, uniq_types1, uniq_repeats1, uniq_thermos1) = FNManager.getTrajDataFromAllFiles(
+                obs_func1,
+                filters=filters,
+                frames=frames,
+                **obs_func_args1,
+                verbose=False
+            )
+
+            (observables2, uniq_types2, uniq_repeats2, uniq_thermos2) = FNManager.getTrajDataFromAllFiles(
+                obs_func2,
+                filters=filters,
+                frames=frames,
+                **obs_func_args2,
+                verbose=False
+            )
+
+            # Filter invalid pairs once so the filtered observables can be reused later.
+            filtered_observables1 = np.full_like(observables1, np.nan, dtype=float)
+            filtered_observables2 = np.full_like(observables2, np.nan, dtype=float)
+            for typeIx in range(len(uniq_types1)):
+                for repeatIx in [1]: # range(len(uniq_repeats1)):
+                    for thermoIx in range(len(uniq_thermos1)):
+                        X = observables1[typeIx, repeatIx, thermoIx, 0, :]
+                        Y = observables2[typeIx, repeatIx, thermoIx, 0, :]
+                        valid = np.isfinite(X) & np.isfinite(Y)
+                        filtered_observables1[typeIx, repeatIx, thermoIx, 0, valid] = X[valid]
+                        filtered_observables2[typeIx, repeatIx, thermoIx, 0, valid] = Y[valid]
+
+            # Now plot 2D histogram for each trajectory
+            kB = 0.008314462618
+            temeratures = {
+                "ala1": [300.0, 370, 456.333333, 562.811111, 694.133704, 856.098235, 1055.854489, 1302.220537, 1606.071995, 1980.822128, 2443.013957, 3013.050548, 3716.095675, 4583.184666],
+                "trpch": [300.0, 400.0, 500.0]
+            }
+            for typeIx in range(len(uniq_types1)):
+                for repeatIx in [1]: # range(len(uniq_repeats1)):
+                    for thermoIx in range(len(uniq_thermos1)):
+                        X = filtered_observables1[typeIx, repeatIx, thermoIx, 0, :]
+                        Y = filtered_observables2[typeIx, repeatIx, thermoIx, 0, :]
+
+                        # If observable values are in radians, convert to degrees for display.
+                        if np.nanmax(np.abs(X)) <= (np.pi + 0.1):
+                            X = np.rad2deg(X)
+                        if np.nanmax(np.abs(Y)) <= (np.pi + 0.1):
+                            Y = np.rad2deg(Y)
+
+                        valid = np.isfinite(X) & np.isfinite(Y)
+                        if not np.any(valid):
+                            continue
+
+                        hist2d, x_edges, y_edges = np.histogram2d(
+                            X[valid],
+                            Y[valid],
+                            bins=72,
+                            range=[[-180.0, 180.0], [-180.0, 180.0]],
+                            density=False,
+                        )
+
+                        total = np.sum(hist2d)
+                        if total == 0.0:
+                            continue
+
+                        p = hist2d / total
+                        pmf = np.full_like(p, np.nan, dtype=float)
+                        mask = p > 0.0
+                        pmf[mask] = -kB * temeratures[args.moleculeName][thermoIx] * np.log(p[mask])
+                        pmf -= np.nanmin(pmf)
+
+                        plt.figure(figsize=(8, 6))
+                        mesh = plt.pcolormesh(x_edges, y_edges, pmf.T, shading='auto', cmap='bwr')
+                        plt.colorbar(mesh, label='PMF = -kT ln(p)')
+                        plt.xlim(-180.0, 180.0)
+                        plt.ylim(-180.0, 180.0)
+                        
+                        plt.xlabel(obs_title1)
+                        plt.ylabel(obs_title2)
+                        plt.title(f"2D PMF: {obs_title1} vs {obs_title2} | Type {uniq_types1[typeIx]} Repeat {uniq_repeats1[repeatIx]} Thermo {uniq_thermos1[thermoIx]}")
+
+            # Finish plots
+            if not args.useAgg:
+                plt.show()
+            plt.close()  
+
+
     #region Restart: write restart files into self.dir/restDir/restDir.<seed>
     if (args.restDir):
         TRAJECTORY_REQUIRED = True
@@ -1725,6 +1709,8 @@ if __name__ == "__main__":
 
     #region Parse arguments
     parser = argparse.ArgumentParser(description='REBAS: Replica Exchange Analysis Script')
+    parser.add_argument('--moleculeName', required=True, help='Molecule name (e.g., ethane, ala1, trpch, adk)')
+
     parser.add_argument('--dir', required=True, help='Directory with data files')
     parser.add_argument('--inFNRoots', nargs='+', required=True, help='Robosample processed output file names')
     parser.add_argument('--topology', help='Topology file')
@@ -1735,6 +1721,7 @@ if __name__ == "__main__":
     parser.add_argument('--outCacheFile', default='rex_cache.pkl', help='Path to cache file')
 
     parser.add_argument('--trajCacheFile', default='rex_cache.pkl', help='Path to cache file')
+    parser.add_argument('--trajBurnin', required=True, type=int, help='Mandatory trajectory burn-in frame index (e.g. 10000)')
 
     parser.add_argument('--restDir', help='Directory where restart files are put')
     parser.add_argument('--dry', action='store_true', default=False, help="No actions, just print.")
