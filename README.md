@@ -49,5 +49,8 @@ python ~/git6/REBAS/rebas.py --dir prod/ala1/everyRepl.00.mi6/ --inFNRoots ala1_
 python ~/git6/REBAS/rebas.py --dir prod/trpch/everyRepl.09.mi6.04/ --inFNRoots trpch_ --topology trpch/ligand.prmtop --cols replicaIx thermoIx wIx acc pe_o --filterBy thermoIx=0,13 --figures traj_stats
 python ~/git6/REBAS/rebas.py --moleculeName trpch --dir prod/trpch/everyRepl.09.mi6.04/ --inFNRoots trpch_ --topology trpch/ligand.prmtop --cols replicaIx thermoIx wIx acc pe_o --filterBy thermoIx=0,1 --figures traj_stats --trajBurnin 10000
 
+python ~/git6/REBAS/rebas.py --moleculeName trpch --dir prod/trpch/everyRepl.09.mi6.04/ --inFNRoots trpch_ --topology trpch/ligand.prmtop --cols replicaIx thermoIx wIx acc pe_o --filterBy thermoIx=0 --figures circ_ACF --trajBurnin 30000 --batDihIxs 1 --acfKinds dihedrals --acfMaxLag 200 --acfBatchSize 16
+
+
 ### ======== ANALYSIS
 Not yet

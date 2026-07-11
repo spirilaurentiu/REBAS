@@ -5,9 +5,11 @@ import os
 import re
 import sys
 import glob
+import time
 from turtle import title
 import pandas as pd
-from batana import BATStats
+from batana import BATIndexBuilder
+from observables import BATStats, compute_bat_values
 import numpy as np
 
 import scipy.stats
@@ -1333,7 +1335,7 @@ def main(args):
                 # AUTOCORRELATION FUNCTION (ACF) Calculate
                 # =============================================================
                 #region Autocorrelation function (ACF) calculate
-                max_lag = 20000
+                max_lag = 50000
 
                 ACF_rhos = np.full((n_types, n_repeats, n_thermos, n_observables, max_lag), fill_value=np.nan)
                 for typeIx in range(n_types):
@@ -1696,6 +1698,193 @@ def main(args):
             plt.close()  
 
 
+        if "circ_RMSF" in args.figures or "circ_ACF" in args.figures:
+            from collections import defaultdict
+
+            # Aggregate per-trajectory mean ACF vectors by simulation type.
+            bat_acf_by_type = defaultdict(lambda: {"bonds": [], "angles": [], "dihedrals": []})
+            bat_index_cache = {}
+            bat_stats = BATStats()
+            max_lag_cap = args.acfMaxLag
+            requested_kinds = set(args.acfKinds) if args.acfKinds else (
+                {"dihedrals"} if args.batDihIxs else {"bonds", "angles", "dihedrals"}
+            )
+            requested_kinds = [kind for kind in ["bonds", "angles", "dihedrals"] if kind in requested_kinds]
+            if not requested_kinds:
+                raise ValueError("No ACF coordinate kinds selected. Use --acfKinds bonds angles dihedrals.")
+
+            need_bonds = "bonds" in requested_kinds
+            need_angles = "angles" in requested_kinds
+            need_dihedrals = "dihedrals" in requested_kinds
+            traj_counter = 0
+
+            def linear_acf_per_coordinate(values, max_lag):
+                arr = np.asarray(values, dtype=float)
+                if arr.size == 0:
+                    return np.empty((0, max_lag + 1), dtype=float)
+                if arr.ndim != 2:
+                    raise ValueError("Expected 2D array with shape (n_frames, n_coords)")
+
+                n_frames, n_coords = arr.shape
+                lag_max = min(max_lag, n_frames - 1)
+                acf = np.full((n_coords, max_lag + 1), np.nan, dtype=float)
+
+                for i in range(n_coords):
+                    x = arr[:, i] - np.mean(arr[:, i])
+                    var = np.mean(x**2)
+                    acf[i, 0] = 1.0
+                    if var <= 0.0:
+                        continue
+                    for lag in range(1, lag_max + 1):
+                        acf[i, lag] = np.mean(x[:-lag] * x[lag:]) / var
+
+                return acf
+
+            def circular_acf_per_coordinate(values, max_lag):
+                arr = np.asarray(values, dtype=float)
+                if arr.size == 0:
+                    return np.empty((0, max_lag + 1), dtype=float)
+                if arr.ndim != 2:
+                    raise ValueError("Expected 2D array with shape (n_frames, n_coords)")
+
+                n_frames, n_coords = arr.shape
+                lag_max = min(max_lag, n_frames - 1)
+                return bat_stats.circularACFPerCoordinate(arr, max_lag=lag_max, batch_size=args.acfBatchSize)
+
+            for row in FNManager.entries:
+                s_type, seed, repeatIx, thermoIx, FN = row
+
+                if args.acfMaxTraj is not None and traj_counter >= args.acfMaxTraj:
+                    break
+
+                # Respect the same trajectory metadata filters used elsewhere.
+                eligible = True
+                for col, val in filters.items():
+                    current_val = {
+                        "seed": int(seed),
+                        "sim_type": int(s_type),
+                        "thermoIx": int(thermoIx),
+                    }.get(col)
+                    if val is not None:
+                        if isinstance(val, list):
+                            if current_val not in val:
+                                eligible = False
+                                break
+                        elif current_val != val:
+                            eligible = False
+                            break
+
+                if not eligible:
+                    continue
+
+                rexTrajData = None
+                try:
+                    rexTrajData = REXTrajData(FN, topology=args.topology)
+                    traj = rexTrajData.get_traj()
+                    if frames is not None:
+                        traj = traj[frames]
+
+                    # Reuse BAT index arrays for trajectories that share the same topology.
+                    topo_key = (traj.n_atoms, traj.topology.n_bonds)
+                    if topo_key not in bat_index_cache:
+                        bat_index_cache[topo_key] = BATIndexBuilder.from_topology(traj.topology)
+                    boIxs_all, angIxs_all, dihIxs_all = bat_index_cache[topo_key]
+
+                    boIxs = boIxs_all if need_bonds else None
+                    angIxs = angIxs_all if need_angles else None
+                    dihIxs = dihIxs_all if need_dihedrals else None
+
+                    if need_dihedrals and args.batDihIxs:
+                        selected_dih_ixs = np.asarray(args.batDihIxs, dtype=int)
+                        if np.any(selected_dih_ixs < 0) or np.any(selected_dih_ixs >= dihIxs_all.shape[0]):
+                            raise ValueError(
+                                f"Invalid --batDihIxs {args.batDihIxs}. Valid range is 0 to {dihIxs_all.shape[0] - 1}"
+                            )
+                        dihIxs = dihIxs_all[selected_dih_ixs]
+
+                    bos, angs, dihs = compute_bat_values(traj, boIxs, angIxs, dihIxs)
+
+                    n_frames = traj.n_frames
+                    if n_frames < 2:
+                        continue
+                    max_lag = min(max_lag_cap, n_frames - 1)
+                    traj_counter += 1
+
+                    traj_label = os.path.basename(FN)
+                    print(
+                        f"[circ_ACF] {traj_label}: frames={n_frames} max_lag={max_lag} kinds={','.join(requested_kinds)} "
+                        f"bonds={bos.shape[1]} angles={angs.shape[1]} dihedrals={dihs.shape[1]}",
+                        flush=True,
+                    )
+                    t0 = time.perf_counter()
+
+                    bonds_acf = linear_acf_per_coordinate(bos, max_lag) if need_bonds else np.empty((0, max_lag + 1), dtype=float)
+                    t1 = time.perf_counter()
+                    angles_acf = circular_acf_per_coordinate(angs, max_lag) if need_angles else np.empty((0, max_lag + 1), dtype=float)
+                    t2 = time.perf_counter()
+                    dihedrals_acf = circular_acf_per_coordinate(dihs, max_lag) if need_dihedrals else np.empty((0, max_lag + 1), dtype=float)
+                    t3 = time.perf_counter()
+
+                    print(
+                        f"[circ_ACF] {traj_label}: bonds={t1 - t0:.3f}s angles={t2 - t1:.3f}s "
+                        f"dihedrals={t3 - t2:.3f}s total={t3 - t0:.3f}s",
+                        flush=True,
+                    )
+
+                    if bonds_acf.size:
+                        bat_acf_by_type[int(s_type)]["bonds"].append(np.nanmean(bonds_acf, axis=0))
+                    if angles_acf.size:
+                        bat_acf_by_type[int(s_type)]["angles"].append(np.nanmean(angles_acf, axis=0))
+                    if dihedrals_acf.size:
+                        bat_acf_by_type[int(s_type)]["dihedrals"].append(np.nanmean(dihedrals_acf, axis=0))
+
+                except Exception as e:
+                    print(f"[SKIP circ_ACF] {os.path.basename(FN)}: {e}")
+                finally:
+                    if rexTrajData is not None:
+                        rexTrajData.clear()
+
+            if len(bat_acf_by_type) == 0:
+                print("No trajectories available for circ_ACF after filtering.")
+            else:
+                ylabels_by_kind = {
+                    "bonds": "Linear ACF",
+                    "angles": "Circular ACF",
+                    "dihedrals": "Circular ACF",
+                }
+                fig, axes = plt.subplots(len(requested_kinds), 1, figsize=(12, 3.5 * len(requested_kinds)), sharex=False)
+                if len(requested_kinds) == 1:
+                    axes = [axes]
+
+                for ax, coord_kind in zip(axes, requested_kinds):
+                    ylabel = ylabels_by_kind[coord_kind]
+                    for sim_type in sorted(bat_acf_by_type.keys()):
+                        bat_acf_list = bat_acf_by_type[sim_type][coord_kind]
+                        if len(bat_acf_list) == 0:
+                            continue
+
+                        bat_acf_arr = np.asarray(bat_acf_list, dtype=float)
+                        mean_vec = np.nanmean(bat_acf_arr, axis=0)
+                        x = np.arange(mean_vec.shape[0])
+                        color = colorByType(sim_type)
+
+                        ax.plot(x, mean_vec, color=color, linewidth=1.0, label=f"Type {sim_type}")
+
+                    ax.set_title(f"BAT {coord_kind} ACF by Type")
+                    ax.set_xlabel("Lag (frames)")
+                    ax.set_ylabel(ylabel)
+                    ax.set_ylim(-1.0, 1.05)
+                    ax.grid(True, alpha=0.3)
+                    ax.legend()
+
+                plt.tight_layout()
+                if args.useAgg:
+                    plt.savefig("traj_circ_ACF_by_type.png")
+
+                if not args.useAgg:
+                    plt.show()
+                plt.close(fig)
+
     #region Restart: write restart files into self.dir/restDir/restDir.<seed>
     if (args.restDir):
         TRAJECTORY_REQUIRED = True
@@ -1731,6 +1920,11 @@ if __name__ == "__main__":
 
     parser.add_argument('--figures', nargs='+', default=[], type=str, help='Figures: tau_ac, potentialEnergyDistrib')
     parser.add_argument('--useAgg', action='store_true', default=False, help="Use Agg backend for matplotlib (no display).")
+    parser.add_argument('--batDihIxs', nargs='+', type=int, default=[], help='Optional BAT dihedral column indices to keep, e.g. --batDihIxs 0 5')
+    parser.add_argument('--acfKinds', nargs='+', choices=['bonds', 'angles', 'dihedrals'], default=None, help='Optional ACF coordinate families to compute. Defaults to all, or just dihedrals when --batDihIxs is provided.')
+    parser.add_argument('--acfMaxLag', type=int, default=200, help='Maximum lag for BAT ACF calculations.')
+    parser.add_argument('--acfBatchSize', type=int, default=64, help='Number of angular coordinates to process per FFT batch.')
+    parser.add_argument('--acfMaxTraj', type=int, default=None, help='Optional maximum number of trajectories to process for circ_ACF.')
     
     args = parser.parse_args()
     #endregion

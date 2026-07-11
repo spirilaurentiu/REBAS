@@ -1,10 +1,10 @@
 # rex_trajdata.py
-from typing import Callable, Any, Dict, Tuple, Optional
-
-import pandas as pd
 import sys
 import mdtraj as md
 import numpy as np
+
+from batana import BATIndexBuilder
+from observables import Observables
 
 # -----------------------------------------------------------------------------
 #                      Robosample trajectory reader
@@ -16,13 +16,29 @@ class REXTrajData:
         self.filepath = filepath
         self.topology = topology
         self.traj = self._load_trajectory()
+        self._bat_indices = None
+        
                 
         self._observables = {
             "distance": lambda t, pair: md.compute_distances(t, [pair]),
             "rg": lambda t: md.compute_rg(t),
+            "bat_rmsf": lambda t: self._compute_bat_rmsf(t),
         }        
     #
 
+    def _get_bat_indices(self):
+        """Build and cache BAT indices from trajectory topology."""
+        if self._bat_indices is None:
+            self._bat_indices = BATIndexBuilder.from_topology(self.traj.topology)
+        return self._bat_indices
+
+    def _compute_bat_rmsf(self, traj):
+        """Compute BAT-space RMSF from a trajectory slice or full trajectory."""
+        boIxs, angIxs, dihIxs = self._get_bat_indices()
+        bos, angs, dihs = Observables.compute_bat_values(traj, boIxs, angIxs, dihIxs)
+        return Observables.compute_bat_rmsf(bos, angs, dihs)
+
+    # Actually helper for __init__, but kept separate for clarity and potential reuse
     def _load_trajectory(self):
         """ MDTraj load trajectory
         Returns:
@@ -37,6 +53,7 @@ class REXTrajData:
             raise
     #
 
+    # Getter for trajectory
     def get_traj(self):
         return self.traj
     #
@@ -50,6 +67,7 @@ class REXTrajData:
         return self.traj.xyz[:, selection, :]
     #
 
+    # Get observable from trajectory using external function
     def get_traj_observable(self, observable="rg", *, frames=None, verbose=False, **kwargs):
         """ Get observable from trajectory
         Args:
@@ -57,7 +75,7 @@ class REXTrajData:
             frames (list or slice, optional): Frames to include. If None, use all frames.
             **kwargs: Additional arguments to pass to the observable function.
             Returns:
-            Tuple[np.ndarray, Dict[str, Any]]: Observable values and metadata.
+            Tuple[Any, Dict[str, Any]]: Observable values and metadata.
         """
         
         traj = self.traj[frames] if frames is not None else self.traj
@@ -82,10 +100,12 @@ class REXTrajData:
         else:
             raise TypeError("observable must be a string key or a callable")
 
-        obs = np.asarray(fn(traj, **kwargs))
+        obs_raw = fn(traj, **kwargs)
+        obs = obs_raw if isinstance(obs_raw, dict) else np.asarray(obs_raw)
         return (obs, meta)
     #
 
+    # Clear trajectory from memory
     def clear(self):
         """ For memory """
         del self.traj

@@ -8,6 +8,352 @@ import mdtraj as md
 import numpy as np
 
 
+def compute_bat_values(traj, boIxs=None, angIxs=None, dihIxs=None):
+    """Compute BAT values for a trajectory given explicit index arrays.
+
+    Any of the index arrays may be omitted to skip computing that BAT family.
+    """
+
+    n_frames = traj.n_frames
+
+    def _empty_values():
+        return np.empty((n_frames, 0), dtype=float)
+
+    if boIxs is None or len(boIxs) == 0:
+        bos = _empty_values()
+    else:
+        bos = np.asarray(md.compute_distances(traj, boIxs), dtype=float)
+
+    if angIxs is None or len(angIxs) == 0:
+        angs = _empty_values()
+    else:
+        angs = np.asarray(md.compute_angles(traj, angIxs), dtype=float)
+
+    if dihIxs is None or len(dihIxs) == 0:
+        dihs = _empty_values()
+    else:
+        dihs = np.asarray(md.compute_dihedrals(traj, dihIxs), dtype=float)
+
+    return bos, angs, dihs
+
+
+def compute_bat_rmsf(bos, angs, dihs):
+    """Compute BAT-space RMS fluctuation summary vectors.
+
+    Bonds use linear RMSF, while angles/dihedrals use circular standard deviation.
+    """
+    stats = BATStats()
+    return {
+        "bonds": stats.linearRMSFPerCoordinate(bos),
+        "angles": stats.circularStdPerCoordinate(angs),
+        "dihedrals": stats.circularStdPerCoordinate(dihs),
+    }
+
+# Compute autocorrelation time for BAT coordinates
+def compute_bat_tau(bos=None, angs=None, dihs=None, max_lag=None, dt=1.0, stop_at_nonpositive=True):
+    """Compute BAT-space autocorrelation time summary vectors.
+
+    Any subset of ``bos``, ``angs``, and ``dihs`` may be provided. Bonds use
+    linear integrated autocorrelation time, while angles/dihedrals use circular
+    integrated autocorrelation time.
+    """
+    if dt <= 0:
+        raise ValueError("dt must be > 0")
+    if bos is None and angs is None and dihs is None:
+        raise ValueError("At least one of bos, angs, or dihs must be provided")
+
+    stats = BATStats()
+
+    def _linear_act_per_coordinate(values):
+        arr = np.asarray(values, dtype=float)
+        if arr.size == 0:
+            return np.array([], dtype=float)
+        if arr.ndim != 2:
+            raise ValueError("Expected 2D array with shape (n_frames, n_coords)")
+
+        n_frames = arr.shape[0]
+        acts = np.zeros(arr.shape[1], dtype=float)
+
+        for i in range(arr.shape[1]):
+            x = arr[:, i]
+            x = x - np.mean(x)
+            var = np.mean(x**2)
+            if var <= 0.0:
+                acts[i] = 0.0
+                continue
+
+            lag_max = n_frames - 1 if max_lag is None else min(int(max_lag), n_frames - 1)
+            if lag_max < 0:
+                raise ValueError("max_lag must be >= 0")
+
+            acf = np.zeros(lag_max + 1, dtype=float)
+            acf[0] = 1.0
+            for lag in range(1, lag_max + 1):
+                acf[lag] = np.mean(x[:-lag] * x[lag:]) / var
+
+            tail = acf[1:]
+            if stop_at_nonpositive:
+                nonpos = np.where(tail <= 0.0)[0]
+                if nonpos.size > 0:
+                    tail = tail[:nonpos[0]]
+
+            tau_int = 1.0 + 2.0 * np.sum(tail)
+            acts[i] = max(0.0, float(tau_int)) * float(dt)
+
+        return acts
+
+    def _circular_act_per_coordinate(values, label):
+        arr = np.asarray(values, dtype=float)
+        if arr.size == 0:
+            return np.array([], dtype=float)
+        if arr.ndim != 2:
+            raise ValueError(f"Expected 2D array with shape (n_frames, n_coords) for {label}")
+
+        acf = stats.circularACFPerCoordinate(arr, max_lag=max_lag)
+        tail = acf[:, 1:]
+        if stop_at_nonpositive:
+            taus = np.zeros(acf.shape[0], dtype=float)
+            for i in range(acf.shape[0]):
+                curr_tail = tail[i]
+                nonpos = np.where(curr_tail <= 0.0)[0]
+                if nonpos.size > 0:
+                    curr_tail = curr_tail[:nonpos[0]]
+                tau_int = 1.0 + 2.0 * np.sum(curr_tail)
+                taus[i] = max(0.0, float(tau_int)) * float(dt)
+            return taus
+
+        tau_int = 1.0 + 2.0 * np.sum(tail, axis=1)
+        tau_int = np.maximum(0.0, tau_int.astype(float))
+        return tau_int * float(dt)
+
+    result = {}
+    if bos is not None:
+        result["bonds"] = _linear_act_per_coordinate(bos)
+    if angs is not None:
+        result["angles"] = _circular_act_per_coordinate(angs, "angs")
+    if dihs is not None:
+        result["dihedrals"] = _circular_act_per_coordinate(dihs, "dihs")
+
+    return result
+
+
+class BATStats:
+    """Circular and spherical statistics.
+
+    Ref: Jammalamadaka, S. R. & Sengupta, A. Topics in Circular Statistics
+    World Scientific Publishing Company Incorporated (2001).
+    """
+
+    def __init__(self):
+        """Initialize BATStats."""
+        pass
+
+    def dihedralMean(self, dihs):
+        """Mean dihedral.
+
+        Args:
+            dihs: list/array of dihedral values in radians.
+
+        Returns:
+            Circular mean dihedral (radians).
+        """
+        dihSinSum = np.sum(np.sin(dihs))
+        dihCosSum = np.sum(np.cos(dihs))
+
+        return np.arctan2(dihSinSum, dihCosSum)
+
+    def dihedralVar(self, dihs):
+        """Circular variance for a dihedral series."""
+        N = len(dihs)
+        if N == 0:
+            return 0.0
+
+        dihSinSum = np.sum(np.sin(dihs))
+        dihCosSum = np.sum(np.cos(dihs))
+
+        R = np.sqrt(dihSinSum**2 + dihCosSum**2) / N
+
+        return (1 - R)
+
+    def dihedralStd(self, dihs):
+        """Circular standard deviation for a dihedral series."""
+        N = len(dihs)
+        if N == 0:
+            return 0.0
+
+        dihSinSum = np.sum(np.sin(dihs))
+        dihCosSum = np.sum(np.cos(dihs))
+        R = np.sqrt(dihSinSum**2 + dihCosSum**2) / N
+
+        R = np.clip(R, 1e-12, 1.0)
+
+        return np.sqrt(-2 * np.log(R))
+
+    # Circular correlation between two dihedral series
+    def dihedralsCorrelation(self, dihs1, dihs2):
+        """Circular correlation between two dihedral series.
+        """
+        x, y = np.array(dihs1), np.array(dihs2)
+
+        x_bar = self.dihedralMean(x)
+        y_bar = self.dihedralMean(y)
+
+        x_diff = np.sin(x - x_bar)
+        y_diff = np.sin(y - y_bar)
+
+        numerator = np.sum(x_diff * y_diff)
+        denominator = np.sqrt(np.sum(x_diff**2) * np.sum(y_diff**2))
+
+        if denominator == 0:
+            return 0.0
+
+        return numerator / denominator
+    #
+
+
+    def compute_all_vs_all_correlations(self, dihs):
+        """Compute all-vs-all circular correlations with NumPy vectorization."""
+        means = np.arctan2(
+            np.sum(np.sin(dihs), axis=0),
+            np.sum(np.cos(dihs), axis=0)
+        )
+
+        sin_diffs = np.sin(dihs - means)
+
+        variances = np.sum(sin_diffs**2, axis=0)
+
+        numerators = sin_diffs.T @ sin_diffs
+
+        norm_factors = np.sqrt(np.outer(variances, variances))
+
+        correlations = numerators / norm_factors
+
+        correlations = np.nan_to_num(correlations)
+
+        return correlations
+
+    def circularStdPerCoordinate(self, values):
+        """Circular standard deviation for each coordinate in a 2D array."""
+        arr = np.asarray(values, dtype=float)
+        if arr.size == 0:
+            return np.array([], dtype=float)
+        if arr.ndim != 2:
+            raise ValueError("Expected 2D array with shape (n_frames, n_coords)")
+        return np.asarray([self.dihedralStd(arr[:, i]) for i in range(arr.shape[1])], dtype=float)
+
+    def linearRMSFPerCoordinate(self, values):
+        """Linear RMS fluctuation for each coordinate in a 2D array."""
+        arr = np.asarray(values, dtype=float)
+        if arr.size == 0:
+            return np.array([], dtype=float)
+        if arr.ndim != 2:
+            raise ValueError("Expected 2D array with shape (n_frames, n_coords)")
+        centered = arr - np.mean(arr, axis=0, keepdims=True)
+        return np.sqrt(np.mean(centered**2, axis=0))
+    #
+
+        # Compute torsion series autocorrelation function
+    def circularACF(self, dihs, max_lag=None):
+        """Calculate the circular autocorrelation of a dihedral timeseries using FFT."""
+        arr = np.asarray(dihs, dtype=float).ravel()
+        if arr.size == 0:
+            return np.array([], dtype=float)
+        return self.circularACFPerCoordinate(arr[:, np.newaxis], max_lag=max_lag)[0]
+
+    def circularACFPerCoordinate(self, values, max_lag=None, batch_size=64):
+        """Calculate circular autocorrelation by FFT for each coordinate in a 2D array.
+
+        Args:
+            values: array with shape (n_frames, n_coords), in radians.
+            max_lag: maximum lag to include in the returned ACF.
+            batch_size: number of coordinates to process per FFT batch.
+
+        Returns:
+            Array with shape (n_coords, n_lags).
+        """
+        arr = np.asarray(values, dtype=float)
+        if arr.size == 0:
+            if max_lag is None:
+                return np.empty((0, 0), dtype=float)
+            return np.empty((0, max_lag + 1), dtype=float)
+        if arr.ndim != 2:
+            raise ValueError("Expected 2D array with shape (n_frames, n_coords)")
+
+        n_frames, n_coords = arr.shape
+        if max_lag is not None:
+            if not isinstance(max_lag, (int, np.integer)):
+                raise TypeError("max_lag must be an integer or None")
+            if max_lag < 0:
+                raise ValueError("max_lag must be >= 0")
+            lag_max = min(int(max_lag), n_frames - 1)
+        else:
+            lag_max = n_frames - 1
+        if not isinstance(batch_size, (int, np.integer)):
+            raise TypeError("batch_size must be an integer")
+        if batch_size <= 0:
+            raise ValueError("batch_size must be > 0")
+
+        fft_len = 2 ** int(np.ceil(np.log2(2 * n_frames - 1)))
+        overlap_counts = np.arange(n_frames, 0, -1, dtype=float)[:, np.newaxis]
+        acf = np.full((n_coords, lag_max + 1), np.nan, dtype=float)
+
+        for start in range(0, n_coords, int(batch_size)):
+            stop = min(start + int(batch_size), n_coords)
+            batch = arr[:, start:stop]
+
+            cos_batch = np.cos(batch)
+            sin_batch = np.sin(batch)
+
+            fft_cos = np.fft.rfft(cos_batch, n=fft_len, axis=0)
+            fft_sin = np.fft.rfft(sin_batch, n=fft_len, axis=0)
+
+            power_cos = fft_cos * np.conj(fft_cos)
+            power_sin = fft_sin * np.conj(fft_sin)
+
+            acf_cos = np.fft.irfft(power_cos, n=fft_len, axis=0)[:n_frames, :]
+            acf_sin = np.fft.irfft(power_sin, n=fft_len, axis=0)[:n_frames, :]
+
+            raw_acf = (acf_cos + acf_sin) / overlap_counts
+            denom = raw_acf[0:1, :]
+
+            with np.errstate(divide="ignore", invalid="ignore"):
+                batch_acf = raw_acf[:lag_max + 1, :] / denom
+
+            batch_acf[:, np.squeeze(denom <= 0.0, axis=0)] = np.nan
+            acf[start:stop, :] = batch_acf.T
+
+        return acf
+
+    def circularACT(self, dihs, max_lag=None, dt=1.0, stop_at_nonpositive=True):
+        """Compute circular integrated autocorrelation time from circular ACF.
+
+        Args:
+            dihs: 1D dihedral series in radians.
+            max_lag: maximum lag to include in ACF estimation.
+            dt: time spacing between consecutive samples.
+            stop_at_nonpositive: if True, truncate at first non-positive ACF lag.
+
+        Returns:
+            Estimated circular autocorrelation time in units of ``dt``.
+        """
+        if dt <= 0:
+            raise ValueError("dt must be > 0")
+
+        ACF = self.circularACF(dihs, max_lag=max_lag)
+        if ACF.size == 0:
+            return 0.0
+
+        tail = ACF[1:]
+        if stop_at_nonpositive:
+            nonpos = np.where(tail <= 0.0)[0]
+            if nonpos.size > 0:
+                tail = tail[:nonpos[0]]
+
+        tau_int = 1.0 + 2.0 * np.sum(tail)
+        tau_int = max(0.0, float(tau_int))
+        return tau_int * float(dt)
+    #
+
 class DihedralGeometryError(ValueError):
     """Raised when a dihedral angle is undefined for degenerate geometry."""
 
@@ -84,6 +430,16 @@ class Observables:
             "ee_dist_max": 5.0,
         },
     }
+
+    @staticmethod
+    def compute_bat_values(traj, boIxs, angIxs, dihIxs):
+        """Compute BAT values for a trajectory given explicit index arrays."""
+        return compute_bat_values(traj, boIxs, angIxs, dihIxs)
+
+    @staticmethod
+    def compute_bat_rmsf(bos, angs, dihs):
+        """Compute BAT-space RMS fluctuation summary vectors."""
+        return compute_bat_rmsf(bos, angs, dihs)
 
     @staticmethod
     def distances(
@@ -263,8 +619,6 @@ class Observables:
             raise ValueError(f"Invalid resid {resid}. Must be between 0 and {torsions_all.shape[1] - 1}")
 
         torsions = torsions_all[:, resid].ravel()
-
-        from batana import BATStats
 
         batStats = BATStats()
         torsions_mean = batStats.dihedralMean(torsions)

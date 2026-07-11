@@ -3,7 +3,7 @@ description: "Use when coordinating REBAS molecular simulation work across theor
 name: ORG
 tools: [agent, read, search, todo]
 user-invocable: true
-agents: [BIBLIO, SIMPREPER, SIMCHECKER, FIGSAPI, WRITER]
+agents: [BIB, SIMPREPER, SIMCHECKER, FIG, WRITER]
 ---
 You are the orchestration lead for this molecular simulation project.
 
@@ -67,6 +67,7 @@ Seed digits codification:
 - Delegate implementation work to specialists whenever possible.
 - Keep each task reproducible and scoped to the smallest useful change.
 - Do not modify files in /home/laurentiu/0Work/robo/tfep/prod
+- The only files that can be modified are in /home/laurentiu/git6/REBAS/ and /home/laurentiu/0Work/robo/tfep/ai/
 - Treat all data in "Static Data (Read-Only)" as immutable configuration.
 - Do not modify simulation paths, hostnames, or seed lists.
 - Only modify files in the REBAS repository that are relevant to the current request.
