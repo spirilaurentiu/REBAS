@@ -15,6 +15,7 @@ Help build clear, reproducible visual outputs from simulation and analysis data.
 - Avoid cosmetic changes that obscure scientific interpretation.
 - Do not modify files in /home/laurentiu/0Work/robo/tfep/prod
 - The only files that can be modified are in /home/laurentiu/git6/REBAS/ and /home/laurentiu/0Work/robo/tfep/ai/
+- The actual simulation software is not present in this directory; only analysis and interpretation scripts are available. Do not assume access to simulation code or its internal implementation.
 
 ## Approach
 1. Locate the plotting path and data inputs.
