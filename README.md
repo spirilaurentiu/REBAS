@@ -21,8 +21,10 @@ Seed digits codification:
 here /home/laurentiu/0Work/robo/tfep/prod/ethane/examSlider/ seeds: [1000000, 1000001, 1000002, 1000003, 1000004, 1000005, 1010200, 1010201, 1010202, 1031200, 1031201, 1031202, 1032200, 1032201, 1032202, 1033200, 1033201, 1033202, 1034200, 1034201, 1034202, 1034204, 1035200, 1035202, 1035204, 1036200, 1036201, 1036202, 1037200, 1037201, 1037202]
 albicastro 49 0Work/robo/tfep/prod/trpch/everyRepl.09.mi6.04/ seeds: [2010500, 2010502, 2010502, 2010503, 2030500, 2030502, 2030502, 2030503]
 salieri 57 0Work/robo/tfep/prod/trpch/everyRepl.09.mi6.04/ seeds: [3030500, 3030501]
+salieri 57 /home/laurentiu/0Work/robo/tfep/prod/adk/everyRepl.00 seeds: [4010500, 4010501, 4030501]
 handel 54 0Work/robo/tfep/prod/trpch/everyRepl.09.mi6.04/  seeds: [3010504, 3010504]
 corelli 47 0Work/robo/tfep/prod/trpch/everyRepl.09.mi6.04/ seeds: [3030504, 3030504]
+corelli 47 0Work/robo/tfep/prod/adk/everyRepl.00/ seeds: [4010502, 4010503, 4030502, 4030503]
 
 # Commands
 

@@ -375,16 +375,129 @@ def colorByType(sim_type):
 #endregion
 def main(args):
 
-    OUTPUT_REQUIRED, TRAJECTORY_REQUIRED = False, False # default flags
+    DRILL_REQUIRED, OUTPUT_REQUIRED, TRAJECTORY_REQUIRED = False, False, False # default flags
+
+    # Check if drill data is requested
+    if args.drill:
+        DRILL_REQUIRED = True
+
     if args.inFNRoots[0][0:3] == 'out':
         OUTPUT_REQUIRED = True
     else:
         TRAJECTORY_REQUIRED = True
-    
+
     FNManager = None # classes
     out_df, traj_df = None, None # pandas
 
     stats = LS_Statistics()
+
+    #region DRILL
+    if DRILL_REQUIRED:
+        drillFNs = [args.dir + "/" + FNRoot for FNRoot in args.inFNRoots]
+        print("Drill files:", drillFNs)
+
+        # drillFNs should contain numeric data with a first header line
+        #  indicaating the name of the column. Read drillFNs 
+        drill_data = []
+
+        for drillFN in drillFNs:
+            with open(drillFN, 'r') as f:
+                header = f.readline().strip().split()
+                data = np.loadtxt(f)
+                drill_data.append((header, data))
+
+        print("Drill data read successfully. Headers and shapes:")
+        for header, data in drill_data:
+            print(header, data.shape)
+            print("First 5 rows of data:\n", data[:5])
+
+        # Get min and max for each column across all drill files
+        col_min_max = {}
+        for header, data in drill_data:
+            for col_idx, col_name in enumerate(header):
+                col_data = data[:, col_idx]
+                if col_name not in col_min_max:
+                    col_min_max[col_name] = [np.min(col_data), np.max(col_data)]
+                else:
+                    col_min_max[col_name][0] = min(col_min_max[col_name][0], np.min(col_data))
+                    col_min_max[col_name][1] = max(col_min_max[col_name][1], np.max(col_data))
+
+        # Generate histograms for each drill file each column and store in 
+        # a list of dictionaries. Use the min and max values across all files for consistent binning.
+        drill_histograms = []
+        for header, data in drill_data:
+            hist_dict = {}
+            for col_idx, col_name in enumerate(header):
+                col_data = data[:, col_idx]
+                col_min, col_max = col_min_max[col_name]
+                hist, bin_edges = np.histogram(col_data, bins=60, range=(col_min, col_max), density=True)
+                hist_dict[col_name] = (hist, bin_edges)
+            drill_histograms.append(hist_dict)
+        print("Histograms generated for drill data.")
+        print("Histograms for each drill file:")
+        for i, hist_dict in enumerate(drill_histograms):
+            print(f"Drill file {i}:")
+            for col_name, (hist, bin_edges) in hist_dict.items():
+                print(f"  Column: {col_name}, Histogram shape: {hist.shape}, Bin edges shape: {bin_edges.shape}")
+                print(f"    First 5 histogram values: {hist[:5]}")
+                print(f"    First 5 bin edges: {bin_edges[:5]}")
+
+        # Fit a normal curve to the raw data for each histogram column
+        from scipy.stats import norm
+        normal_fits = []
+        for (header, data), hist_dict in zip(drill_data, drill_histograms):
+            fit_dict = {}
+            for col_idx, col_name in enumerate(header):
+                if col_name not in hist_dict:
+                    continue
+                col_data = data[:, col_idx][10:] 
+                mu, std = norm.fit(col_data)
+                fit_dict[col_name] = (mu, std)
+            normal_fits.append(fit_dict)
+
+        # Plot histograms for each drill file for bonE_sum_T1 and bondE_sum_T2
+        plt.figure()
+        for hist_ix, hist_dict in enumerate(drill_histograms):
+            for col_name, (hist, bin_edges) in hist_dict.items():
+                print(f"Plotting histogram for column: {col_name}")
+                if col_name[0:4] == "Dist":
+                #if True:
+                    plot1D(
+                        instantiateFigure=False,
+                        Y=[hist],
+                        X=[(bin_edges[:-1] + bin_edges[1:]) / 2],  # Use bin centers for X
+                        title=f"Histogram of {col_name}",
+                        xlabel=col_name,
+                        ylabel="Density",
+                        labels=[col_name],
+                        colors=["black"],
+                        linestyle="-",
+                        marker=None,
+                        alpha=0.7
+                    )
+
+                    fit_params = normal_fits[hist_ix].get(col_name)
+                    if fit_params is not None:
+                        mu, std = fit_params
+                        col_min, col_max = col_min_max[col_name]
+                        x_fit = np.linspace(col_min, col_max, 400)
+                        y_fit = norm.pdf(x_fit, loc=mu, scale=std)
+                        plt.plot(x_fit, y_fit, linestyle="--", color="red", linewidth=1.5, alpha=0.8)
+
+        plt.show()
+
+        # Do the Shapiro–Wilk test for normality
+        from scipy.stats import shapiro
+        for header, data in drill_data:
+            hist_dict = {}
+            for col_idx, col_name in enumerate(header):
+                if col_name[0:4] == "Dist":
+                    col_data = data[:, col_idx]
+                    print(f"First 5 values of {col_name}: {col_data[:5]}")
+                    stat, p = shapiro(col_data[::1000])  # Shapiro is sensitive to large datasets
+                    print(f"Shapiro–Wilk test for {col_name}: stat={stat}, p={p}")
+    #endregion # DRILL
+
 
     if OUTPUT_REQUIRED:
 
@@ -463,7 +576,7 @@ def main(args):
         # exit(2)
         #endregion Panda_Study
 
-        #region In-house basic checks
+        #region In-house BASIC CHECKS
         # Column histograms checks
         if len(args.basicChecks) > 0:
 
@@ -1885,6 +1998,7 @@ def main(args):
                     plt.show()
                 plt.close(fig)
 
+
     #region Restart: write restart files into self.dir/restDir/restDir.<seed>
     if (args.restDir):
         TRAJECTORY_REQUIRED = True
@@ -1902,6 +2016,9 @@ if __name__ == "__main__":
 
     parser.add_argument('--dir', required=True, help='Directory with data files')
     parser.add_argument('--inFNRoots', nargs='+', required=True, help='Robosample processed output file names')
+
+    parser.add_argument('--drill', nargs='+', default=[], type=str, help='Read files with drill data (e.g., out.ala10.reshaped)')
+
     parser.add_argument('--topology', help='Topology file')
     parser.add_argument('--cols', nargs='+', help='Columns to be read')
     parser.add_argument('--filterBy', nargs='*', default=[], help='Optional filters in the format col=value (e.g. wIx=0)')
