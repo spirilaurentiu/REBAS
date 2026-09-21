@@ -225,26 +225,19 @@ class LS_Statistics:
             Returns:
                 float : estimated integrated autocorrelation time
         """
-        # 1 + 2 * sum(rho)
-        # Using a running sum to find the self-consistent window
+        # 1 + 2 * sum(rho), using the initial-positive-sequence rule and
+        # stopping once the integration window is self-consistent.
         tau_est = 1.0
-        for lIx in range(1, len(ACF_rho)):
-            tau_est += 2 * ACF_rho[lIx]
-
-            #print(ACF_rho[lIx], tau_est, window_factor, window_factor * tau_est) # Debug: print the ACF values used in the sum
-
-            if ACF_rho[lIx] <= 0.1:
+        for lag in range(1, len(ACF_rho)):
+            rho = float(ACF_rho[lag])
+            if not np.isfinite(rho) or rho <= 0:
                 break
 
-            if ACF_rho[lIx] < 0.2:
-                if lIx > (window_factor * tau_est):
-                    break
+            tau_est += 2.0 * rho
+            if lag >= window_factor * tau_est:
+                break
 
-            # Warning if we hit the end of the array without 'breaking'
-            if lIx == len(ACF_rho) - 1:
-                print("Warning: Tau estimation did not converge within the provided lags.")
-
-        return tau_est
+        return max(1.0, float(tau_est))
     #
 
     # Calculates Integrated Autocorrelation Time (Hai's paper method eq 19)
@@ -362,7 +355,9 @@ class LS_Statistics:
 
     # Autocorrelation manual loop (UNREVISED)
     def autocorr2_revised(self, data, lag_fraction=0.1, max_lag=5000, detect_equilibration=False):
-        """ Manual: Loop-based (Slow for large max_lag)
+        """ Manual: Loop-based (Slow for large max_lag).
+
+        Returns ``(ACF_rho, tau, ess, t0_clean)``.
         """
         clean_data, clean_indices = self._sanitize_timeseries(data)
         N_clean = len(clean_data)
@@ -376,9 +371,21 @@ class LS_Statistics:
             "equilibration": None
         }
 
+        finite_mask = np.isfinite(np.asarray(data, dtype=float).reshape(-1))
+        finite_indices = np.flatnonzero(finite_mask)
+        has_internal_gaps = (
+            finite_indices.size > 1
+            and np.any(np.diff(finite_indices) > 1)
+        )
+        self.last_autocorr2_meta["internal_gaps"] = bool(has_internal_gaps)
+
         if N_clean == 0:
             print("No finite samples; autocorrelation undefined.")
-            return (np.array([np.nan]), np.nan, np.nan)
+            return (np.array([np.nan]), np.nan, np.nan, 0)
+
+        if has_internal_gaps:
+            print("Internal non-finite samples; autocorrelation undefined.")
+            return (np.array([np.nan]), np.nan, np.nan, 0)
 
         t0_clean = 0
         if detect_equilibration:
@@ -393,7 +400,7 @@ class LS_Statistics:
 
         if N < 2:
             print("Not enough post-equilibration samples; autocorrelation undefined.")
-            return (np.array([np.nan]), np.nan, np.nan)
+            return (np.array([np.nan]), np.nan, np.nan, t0_clean)
 
         miu = np.mean(work_data)
         xp = work_data - miu
@@ -401,11 +408,13 @@ class LS_Statistics:
 
         if not np.isfinite(var) or var <= 0:
             print("Variance of data is zero; autocorrelation undefined.")
-            return (np.full(N, np.nan), np.nan, np.nan)
+            return (np.full(N, np.nan), np.nan, np.nan, t0_clean)
 
         max_lag = self.get_num_lags(N, lag_fraction, max_lag)
         if max_lag < 1:
-            return (np.array([1.0]), 1.0, float(N))
+            if detect_equilibration and self.last_autocorr2_meta["equilibration"] is not None:
+                self.last_autocorr2_meta["equilibration"]["reason"] = "insufficient_lags"
+            return (np.array([1.0]), np.nan, np.nan, t0_clean)
 
         # Calculate ACF up to num_lags for finite, optionally post-equilibration data.
         ACF_rho = np.array([
@@ -413,15 +422,15 @@ class LS_Statistics:
             for lag in range(max_lag)
         ])
 
-        tau = self.getTau(ACF_rho)
-        ess = N / tau if np.isfinite(tau) and tau > 0 else np.nan
+        tau = max(1.0, float(self.getTau(ACF_rho)))
+        ess = min(float(N), N / tau)
 
         if detect_equilibration and self.last_autocorr2_meta["equilibration"] is not None:
             self.last_autocorr2_meta["equilibration"]["n_production"] = int(N)
             self.last_autocorr2_meta["equilibration"]["tau_production"] = float(tau) if np.isfinite(tau) else np.nan
             self.last_autocorr2_meta["equilibration"]["ess_production"] = float(ess) if np.isfinite(ess) else np.nan
 
-        return (ACF_rho, tau, ess)
+        return (ACF_rho, tau, ess, t0_clean)
     #
 
     # Autocorrelation using FFT (Wiener-Khinchin Theorem)
@@ -502,6 +511,8 @@ class LS_Statistics:
             print(f"Fit failed: {e}")
             return acf, None, None
     #
+
+    
 
     #endregion # autocorrelation --------------------------------------------------
 

@@ -532,7 +532,7 @@ def main(args):
                 # --- Calculate Autocorrelation Time (Integrated) ---
                 #obs_tau = calculate_iat(obs_data)
                 #print("obs_tau", obs_tau)
-                (ACF_rho, obs_tau, ess) = autocorr2_revised(obs_data, lag_fraction=0.5, max_lag=50000)
+                (ACF_rho, obs_tau, ess, t0_clean) = autocorr2_revised(obs_data, lag_fraction=0.5, max_lag=50000)
                 #print("obs_tau", obs_tau)
                 #(ACF_rho, obs_tau, ess) = autocorr3_revised(obs_data, lag_fraction=0.5, max_lag=50000)
                 #print("obs_tau", obs_tau)

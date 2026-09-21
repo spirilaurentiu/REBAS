@@ -447,8 +447,11 @@ class Observables:
         pairs: Sequence[Sequence[int]] | None = None,
     ):
         """Compute pairwise distances and return shape (n_pairs, n_frames)."""
-        if pairs is None:
+
+        if pairs is None: # Set a default
             pairs = [[8, 298], [100, 200]]
+        elif pairs == [[-1, -1]]: # all pairs
+            pairs = [[bond.atom1.index, bond.atom2.index] for bond in traj.topology.bonds]
 
         result = md.compute_distances(traj, pairs)
         return result.T

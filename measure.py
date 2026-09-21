@@ -60,75 +60,40 @@ def parse_arguments() -> argparse.Namespace:
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
 
-    parser.add_argument(
-        "--prmtop",
-        required=True,
-        type=Path,
+    parser.add_argument("--prmtop", required=True, type=Path,
         help="AMBER topology file.",
     )
-    parser.add_argument(
-        "--dcd",
-        required=True,
-        type=Path,
+    parser.add_argument("--dcd", required=True, type=Path,
         help="DCD trajectory file.",
     )
-
+    
     measurement_group = parser.add_mutually_exclusive_group(required=True)
 
-    measurement_group.add_argument(
-        "--bond",
-        nargs=2,
-        type=int,
-        metavar=("ATOM_1", "ATOM_2"),
+    measurement_group.add_argument("--bond", nargs=2, type=int, metavar=("ATOM_1", "ATOM_2"),
         help="Measure a bond distance using two zero-based atom indices.",
     )
-    measurement_group.add_argument(
-        "--angle",
-        nargs=3,
-        type=int,
-        metavar=("ATOM_1", "ATOM_2", "ATOM_3"),
+    measurement_group.add_argument("--angle", nargs=3, type=int, metavar=("ATOM_1", "ATOM_2", "ATOM_3"),
         help="Measure an angle using three zero-based atom indices.",
     )
-    measurement_group.add_argument(
-        "--dihedral",
-        nargs=4,
-        type=int,
-        metavar=("ATOM_1", "ATOM_2", "ATOM_3", "ATOM_4"),
+    measurement_group.add_argument("--dihedral", nargs=4, type=int, metavar=("ATOM_1", "ATOM_2", "ATOM_3", "ATOM_4"),
         help="Measure a dihedral using four zero-based atom indices.",
     )
-
-    parser.add_argument(
-        "--bins",
-        type=positive_integer,
-        default=72,
+    parser.add_argument("--bins", type=positive_integer, default=72,
         help="Number of histogram bins.",
     )
-    parser.add_argument(
-        "--stride",
-        type=positive_integer,
-        default=1,
+    parser.add_argument("--stride", type=positive_integer, default=1,
         help="Read every Nth trajectory frame.",
     )
-    parser.add_argument(
-        "--output",
-        type=Path,
-        default=None,
+    parser.add_argument("--output", type=Path, default=None,
         help="Output plot filename. A descriptive filename is used by default.",
     )
-    parser.add_argument(
-        "--csv",
-        type=Path,
-        default=None,
+    parser.add_argument("--csv", type=Path, default=None,
         help="Output CSV filename. A descriptive filename is used by default.",
     )
-    parser.add_argument(
-        "--no-periodic",
-        action="store_true",
+    parser.add_argument("--no-periodic", action="store_true",
         help="Disable minimum-image periodic-boundary handling.",
     )
-    parser.add_argument(
-        "--show",
-        action="store_true",
+    parser.add_argument("--show", action="store_true",
         help="Display the plot interactively after saving it.",
     )
 
