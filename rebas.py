@@ -394,9 +394,8 @@ def main(args):
     if args.drill:
         DRILL_REQUIRED = True
 
-    if args.inFNRoots[0][0:3] == 'out':
+    if "recover_replica" in args.figures:
         OUTPUT_REQUIRED = True
-    else:
         TRAJECTORY_REQUIRED = True
 
     FNManager = None # classes
@@ -521,8 +520,44 @@ def main(args):
                     print(f"Shapiro–Wilk test for {col_name}: stat={stat}, p={Prob}")
     #endregion # DRILL
 
+    if OUTPUT_REQUIRED and TRAJECTORY_REQUIRED:
 
-    if OUTPUT_REQUIRED:
+        GLOBAL_OUTPUT_BURNIN = 0
+
+        # -----------------------------------------------------------------------------
+        # Read output from all files
+        # -----------------------------------------------------------------------------
+        #region Read output from all files
+        if True: # Read output into out_df
+            if args.useCache and os.path.exists(args.outCacheFile):
+                print(f"Loading data from cache: {args.outCacheFile}")
+                out_df = pd.read_pickle(args.outCacheFile)
+            else:
+                FNManager = REXFNManager(args.dir, args.inFNRoots, args.cols)
+                out_df = FNManager.getDataFromAllFiles(burnin = GLOBAL_OUTPUT_BURNIN)
+
+                if args.writeCache:
+                    if os.path.exists(args.outCacheFile):
+                        raise FileExistsError(f"Cache file '{args.outCacheFile}' already exists. Use a different name or delete it.")
+                    print(f"Writing data to cache: {args.outCacheFile}")
+                    out_df.to_pickle(args.outCacheFile)
+
+            # Apply filters if specified
+            if args.filterBy:
+                filters = parse_filters(args.filterBy)
+                for col, val in filters.items():
+                    if col not in out_df.columns:
+                        raise ValueError(f"Filter column '{col}' not found in DataFrame columns.")
+                    if isinstance(val, list):  # multiple OR values
+                        out_df = out_df[out_df[col].isin(val)]
+                    else:  # single value
+                        out_df = out_df[out_df[col] == val]
+        #endregion
+
+        #out_df.info()
+        print("outf_df info:\n", out_df.info())
+
+    elif OUTPUT_REQUIRED:
 
         GLOBAL_OUTPUT_BURNIN = 0
 
@@ -553,7 +588,7 @@ def main(args):
         # Read output from all files
         # -----------------------------------------------------------------------------
         #region Read output from all files
-        if True: # Read ouput into out_df
+        if True: # Read output into out_df
             if args.useCache and os.path.exists(args.outCacheFile):
                 print(f"Loading data from cache: {args.outCacheFile}")
                 out_df = pd.read_pickle(args.outCacheFile)
@@ -579,8 +614,8 @@ def main(args):
                         out_df = out_df[out_df[col] == val]
         #endregion
 
-        # out_df.info()
-        # # #print("outf_df info:\n", out_df.info())
+        #out_df.info()
+        #print("outf_df info:\n", out_df.info())
 
         #region Panda_Study
         # print("out_df:\n", out_df)
@@ -1182,7 +1217,7 @@ def main(args):
         #endregion
 
 
-    if TRAJECTORY_REQUIRED:
+    elif TRAJECTORY_REQUIRED:
 
         #region Get filters if specified
         # Get filters if specified
@@ -2357,6 +2392,8 @@ def main(args):
                     plt.show()
                 plt.close(fig)
 
+    else:
+        print("Neither output nor trajectory data is required.")
 
     #region Restart: write restart files into self.dir/restDir/restDir.<seed>
     if (args.restDir):
