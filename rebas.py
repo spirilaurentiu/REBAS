@@ -394,9 +394,15 @@ def main(args):
     if args.drill:
         DRILL_REQUIRED = True
 
-    if "recover_replica" in args.figures:
+    if args.inFNRoots is not None:
         OUTPUT_REQUIRED = True
+
+    if args.inTrajFNRoots is not None:
         TRAJECTORY_REQUIRED = True
+
+    print("DRILL_REQUIRED:", DRILL_REQUIRED)
+    print("OUTPUT_REQUIRED:", OUTPUT_REQUIRED)
+    print("TRAJECTORY_REQUIRED:", TRAJECTORY_REQUIRED)
 
     FNManager = None # classes
     out_df, traj_df = None, None # pandas
@@ -524,40 +530,152 @@ def main(args):
 
         GLOBAL_OUTPUT_BURNIN = 0
 
-        # -----------------------------------------------------------------------------
-        # Read output from all files
-        # -----------------------------------------------------------------------------
-        #region Read output from all files
-        if True: # Read output into out_df
-            if args.useCache and os.path.exists(args.outCacheFile):
-                print(f"Loading data from cache: {args.outCacheFile}")
-                out_df = pd.read_pickle(args.outCacheFile)
-            else:
-                FNManager = REXFNManager(args.dir, args.inFNRoots, args.cols)
-                out_df = FNManager.getDataFromAllFiles(burnin = GLOBAL_OUTPUT_BURNIN)
+        if "recover_replica" in args.figures:
 
-                if args.writeCache:
-                    if os.path.exists(args.outCacheFile):
-                        raise FileExistsError(f"Cache file '{args.outCacheFile}' already exists. Use a different name or delete it.")
-                    print(f"Writing data to cache: {args.outCacheFile}")
-                    out_df.to_pickle(args.outCacheFile)
+                # -----------------------------------------------------------------------------
+                # Read output from all files
+                # -----------------------------------------------------------------------------
+                #region Read output from all files
+                if True: # Read output into out_df
+                    if args.useCache and os.path.exists(args.outCacheFile):
+                        print(f"Loading data from cache: {args.outCacheFile}")
+                        out_df = pd.read_pickle(args.outCacheFile)
+                    else:
+                        FNManager = REXFNManager(args.dir, args.inFNRoots, args.cols)
+                        out_df = FNManager.getDataFromAllFiles(burnin = GLOBAL_OUTPUT_BURNIN)
 
-            # Apply filters if specified
-            if args.filterBy:
-                filters = parse_filters(args.filterBy)
-                for col, val in filters.items():
-                    if col not in out_df.columns:
-                        raise ValueError(f"Filter column '{col}' not found in DataFrame columns.")
-                    if isinstance(val, list):  # multiple OR values
-                        out_df = out_df[out_df[col].isin(val)]
-                    else:  # single value
-                        out_df = out_df[out_df[col] == val]
-        #endregion
+                        if args.writeCache:
+                            if os.path.exists(args.outCacheFile):
+                                raise FileExistsError(f"Cache file '{args.outCacheFile}' already exists. Use a different name or delete it.")
+                            print(f"Writing data to cache: {args.outCacheFile}")
+                            out_df.to_pickle(args.outCacheFile)
 
-        #out_df.info()
-        print("outf_df info:\n", out_df.info())
+                    # Apply filters if specified
+                    if args.filterBy:
+                        filters = parse_filters(args.filterBy)
+                        for col, val in filters.items():
+                            if col not in out_df.columns:
+                                raise ValueError(f"Filter column '{col}' not found in DataFrame columns.")
+                            if isinstance(val, list):  # multiple OR values
+                                out_df = out_df[out_df[col].isin(val)]
+                            else:  # single value
+                                out_df = out_df[out_df[col] == val]
+                #endregion
 
-    elif OUTPUT_REQUIRED:
+                #out_df.info()
+                #print("outf_df info:\n", out_df.info())
+
+                #region Panda_Study
+                #print("out_df:\n", out_df)
+                #grouped = out_df.groupby(['replicaIx'])
+                #print("\n\nout_df.groupby(['replicaIx']):\n")
+                #for name, df in grouped:
+                #    print("Group:", name)
+                #    print(df)
+                #print("\n\nout_df.info:\n", out_df.info())
+                #print("\n\nout_df.index:\n", out_df.index)
+                #print("\nout_df.columns:\n", out_df.columns)
+                #print("\nout_df.dtypes:\n", out_df.dtypes)
+                #print("out_df.axes:\n", out_df.axes)
+                #print("\n\nout_df.keys():\n", out_df.keys())
+                #print('\n\nout_df.get("thermoIx"):\n', out_df.get("thermoIx"))
+                # exit(2)
+                #endregion Panda_Study
+
+                observables = []
+                observables_meta = []
+                ix = -1
+                for (sim_type, seed), subdf_group in out_df.groupby(["sim_type", "seed"]):
+                    ix += 1
+                    print(f"Processing sim_type={sim_type}, seed={seed} (group {ix})")
+                    #print(subdf_group)
+
+                    repIxs = subdf_group["replicaIx"].to_numpy()
+                    theIxs = subdf_group["thermoIx"].to_numpy()
+                    concatData = np.concatenate(([repIxs], [theIxs]), axis=0)
+                    print("============= repIxs theIxs concatData")
+                    print(repIxs.shape, theIxs.shape, concatData.shape)
+
+                    observables.append(concatData)
+                    observables_meta.append({
+                        "sim_type": sim_type,
+                        "seed": seed,})
+
+                print("Observvables:")
+                print(observables)
+
+                    
+                # -----------------------------------------------------------------------------
+                # Read trajectory data from all files
+                # -----------------------------------------------------------------------------
+                #region Get filters if specified
+                # Get filters if specified
+                filters = {}
+                if args.filterBy:
+                    filters = parse_filters(args.filterBy)
+                    for col, val in filters.items():
+                        print(f"filter: {col} = {val}")
+                #endregion
+
+                GLOBAL_TRAJ_BURNIN = args.trajBurnin
+                GLOBAL_END = None
+
+                # pick your frame slice once:
+                frames = slice(GLOBAL_TRAJ_BURNIN, GLOBAL_END)   # or slice(GLOBAL_BURNIN, None)
+
+                FNManager = REXFNManager(args.dir, args.inTrajFNRoots, args.cols, topology=args.topology)
+                FNManager.prepareTrajArraySize(filters=filters)
+
+                obs_func, obs_func_args, obs_name, obs_title = None, {}, "", ""
+
+                if args.moleculeName == "2but":
+                    obs_func = Observables.distances
+                    obs_func_args = {"pairs": [[-1, -1]]}
+                    obs_name = Observables.distances.__name__
+                    obs_title = "2-butanol Bonds Lengths"
+                    firstTemperature = 300.0
+                    firstDeltaT = 600.0
+
+                elif args.moleculeName == "ala1":
+                    obs_func = Observables.distances
+                    obs_func_args = {"pairs": [[-1, -1]]}
+                    obs_name = Observables.distances.__name__
+                    obs_title = "Alanine dipeptide Bonds Lengths"
+                    firstTemperature = 300.0
+                    firstDeltaT = 50.0                                        
+                
+                elif args.moleculeName == "trpch":
+                    obs_func = Observables.distances
+                    obs_func_args = {"pairs": [[8, 298]]}
+                    obs_name = Observables.distances.__name__
+                    obs_title = "Trp-Cage Bonds Lengths"
+                    firstTemperature = 300.0
+                    firstDeltaT = 30
+            
+                (observables, uniq_types, uniq_repeats, uniq_thermos) = FNManager.getTrajDataFromAllFiles(
+                    obs_func,
+                    filters=filters,
+                    frames=frames,
+                    **obs_func_args,
+                    verbose=False
+                )
+
+                print("observables.shape", observables.shape)
+                n_types, n_repeats, n_thermos, n_observables, n_frames = observables.shape
+                #print("observables", observables)
+                print("uniq_types", uniq_types)
+                print("uniq_repeats", uniq_repeats)
+                print("uniq_thermos", uniq_thermos)
+
+                # geometric progression along 14 replicas
+                temperatureRatio = (firstTemperature + firstDeltaT) / firstTemperature
+                Ts = [
+                    firstTemperature * temperatureRatio**thermoIx
+                    for thermoIx in range(n_thermos)
+                ]
+
+
+    elif OUTPUT_REQUIRED and (not TRAJECTORY_REQUIRED):
 
         GLOBAL_OUTPUT_BURNIN = 0
 
@@ -1217,7 +1335,7 @@ def main(args):
         #endregion
 
 
-    elif TRAJECTORY_REQUIRED:
+    elif (not OUTPUT_REQUIRED) and TRAJECTORY_REQUIRED:
 
         #region Get filters if specified
         # Get filters if specified
@@ -1266,7 +1384,7 @@ def main(args):
         # pick your frame slice once:
         frames = slice(GLOBAL_TRAJ_BURNIN, GLOBAL_END)   # or slice(GLOBAL_BURNIN, None)
 
-        FNManager = REXFNManager(args.dir, args.inFNRoots, args.cols, topology=args.topology)
+        FNManager = REXFNManager(args.dir, args.inTrajFNRoots, args.cols, topology=args.topology)
         FNManager.prepareTrajArraySize(filters=filters)
 
         # Preliminary statistics
@@ -2392,13 +2510,14 @@ def main(args):
                     plt.show()
                 plt.close(fig)
 
+
     else:
         print("Neither output nor trajectory data is required.")
 
     #region Restart: write restart files into self.dir/restDir/restDir.<seed>
     if (args.restDir):
         TRAJECTORY_REQUIRED = True
-        FNManager = REXFNManager(args.dir, args.inFNRoots, args.cols)
+        FNManager = REXFNManager(args.dir, args.inTrajFNRoots, args.cols)
         FNManager.write_restarts_from_trajectories(args.restDir, args.topology, dry=args.dry)
     #endregion
 
@@ -2411,7 +2530,8 @@ if __name__ == "__main__":
     parser.add_argument('--moleculeName', required=True, help='Molecule name (e.g., ethane, ala1, trpch, adk)')
 
     parser.add_argument('--dir', required=True, help='Directory with data files')
-    parser.add_argument('--inFNRoots', nargs='+', required=True, help='Robosample processed output file names')
+    parser.add_argument('--inFNRoots', nargs='+', required=False, help='Robosample processed output file names')
+    parser.add_argument('--inTrajFNRoots', nargs='+', required=False, help='Trajectory file names')
 
     parser.add_argument('--drill', nargs='+', default=[], type=str, help='Read files with drill data (e.g., out.ala10.reshaped)')
 
