@@ -46,7 +46,7 @@ import mdtraj as md
 #                                MAIN
 #region Main ------------------------------------------------------------------
 
-# Parse a set of filters given as arguments in the format: ---filterBy col=val
+# Parse a set of filters given as arguments in the format: --filterBy or --filterTrajBy col=val
 def parse_filters(filters):
     """ Convert list of 'col=value' strings into a dict.
         Supports multiple OR values separated by commas, e.g. 'wIx=0,1'
@@ -536,6 +536,7 @@ def main(args):
                 # Read output from all files
                 # -----------------------------------------------------------------------------
                 #region Read output from all files
+                FNManager = None
                 if True: # Read output into out_df
                     if args.useCache and os.path.exists(args.outCacheFile):
                         print(f"Loading data from cache: {args.outCacheFile}")
@@ -582,6 +583,7 @@ def main(args):
                 # exit(2)
                 #endregion Panda_Study
 
+                #region Read observables
                 observables = []
                 observables_meta = []
                 ix = -1
@@ -604,28 +606,29 @@ def main(args):
                         "sim_type": sim_type,
                         "seed": seed,})
 
-                # Print a summary
-                SOME_PRINT_BURNIN = 0
-                print("Observables:")
-                #print(observables[0][:, SOME_PRINT_BURNIN:])
-                #print(observables[0].T[SOME_PRINT_BURNIN:])
-                for obsIx, obs in enumerate(observables):
-                    if obsIx > 1:
-                        break
-                    for obsEntryIx, obsEntry in enumerate(obs.T[SOME_PRINT_BURNIN:]):
-                        print("repIx, theIx,",  obsEntry[0], obsEntry[1])
-                        if obsEntryIx > (42):
-                            break
+                # # Print a summary
+                # SOME_PRINT_BURNIN = 0
+                # print("Observables:")
+                # #print(observables[0][:, SOME_PRINT_BURNIN:])
+                # #print(observables[0].T[SOME_PRINT_BURNIN:])
+                # for obsIx, obs in enumerate(observables):
+                #     if obsIx > 1:
+                #         break
+                #     for obsEntryIx, obsEntry in enumerate(obs.T[SOME_PRINT_BURNIN:]):
+                #         print("repIx, theIx,",  obsEntry[0], obsEntry[1])
+                #         if obsEntryIx > (5):
+                #             break
 
-                    
+                #endregion Read observables
+
                 # -----------------------------------------------------------------------------
                 # Read trajectory data from all files
                 # -----------------------------------------------------------------------------
                 #region Get filters if specified
                 # Get filters if specified
                 filters = {}
-                if args.filterBy:
-                    filters = parse_filters(args.filterBy)
+                if args.filterTrajBy:
+                    filters = parse_filters(args.filterTrajBy)
                     for col, val in filters.items():
                         print(f"filter: {col} = {val}")
                 #endregion
@@ -636,8 +639,8 @@ def main(args):
                 # pick your frame slice once:
                 frames = slice(GLOBAL_TRAJ_BURNIN, GLOBAL_END)   # or slice(GLOBAL_BURNIN, None)
 
-                FNManager = REXFNManager(args.dir, args.inTrajFNRoots, args.cols, topology=args.topology)
-                FNManager.prepareTrajArraySize(filters=filters)
+                trajFNManager = REXFNManager(args.dir, args.inTrajFNRoots, args.cols, topology=args.topology)
+                trajFNManager.prepareTrajArraySize(filters=filters)
 
                 obs_func, obs_func_args, obs_name, obs_title = None, {}, "", ""
 
@@ -665,7 +668,7 @@ def main(args):
                     firstTemperature = 300.0
                     firstDeltaT = 30
             
-                (trajObservables, uniq_types, uniq_repeats, uniq_thermos) = FNManager.getTrajDataFromAllFiles(
+                (trajObservables, uniq_types, uniq_repeats, uniq_thermos) = trajFNManager.getTrajDataFromAllFiles(
                     obs_func,
                     filters=filters,
                     frames=frames,
@@ -675,17 +678,56 @@ def main(args):
 
                 print("trajObservables.shape", trajObservables.shape)
                 n_types, n_repeats, n_thermos, n_trajObservables, n_frames = trajObservables.shape
-                #print("trajObservables", trajObservables)
-                print("uniq_types", uniq_types)
-                print("uniq_repeats", uniq_repeats)
-                print("uniq_thermos", uniq_thermos)
+                print("trajObservables", trajObservables)
+                #print("uniq_types", uniq_types)
+                #print("uniq_repeats", uniq_repeats)
+                #print("uniq_thermos", uniq_thermos)
 
-                # geometric progression along 14 replicas
+                # Geometric progression along 14 replicas
                 temperatureRatio = (firstTemperature + firstDeltaT) / firstTemperature
                 Ts = [
                     firstTemperature * temperatureRatio**thermoIx
                     for thermoIx in range(n_thermos)
                 ]
+
+
+                print("FNManager entries:", FNManager.entries)
+                print("trajFNManager entries:", trajFNManager.entries)
+
+
+                # Iterate simulation types
+                for one_obs_meta in observables_meta:
+                    out_type = one_obs_meta["sim_type"]
+                    out_seed = one_obs_meta["seed"]
+                    print("Output sim_type and seed:", out_type, out_seed)
+
+                    for trajEntry in trajFNManager.entries: # already sorted by prepareTrajArraySize
+                        print("trajEntry sim_type, seed, repeatIx, thermo_index",
+                              trajEntry[0], trajEntry[1], trajEntry[2], trajEntry[3])
+                        if (int(trajEntry[0]) != int(out_type)) or int((trajEntry[1]) != int(out_seed)):
+                            continue
+
+                    for trajTypeIx in range(n_types):
+                        trajType = uniq_types[trajTypeIx]
+                        print("trajTypeIx, trajType:", trajTypeIx, trajType)
+
+                    for thermoIx in range(n_thermos):
+                        trajThermo = uniq_thermos[thermoIx]
+                        print("thermoIx, trajThermo:", thermoIx, trajThermo)
+
+                    trajObsIx = 0 # Assuming single observable for now
+                        
+
+
+
+
+                justThisReplIx = 0 # to be replced with a for loop
+                frameRange = range(0, 10)
+                selected_thermoIxs = observables[0][1][
+                    observables[0][0] == justThisReplIx
+                ][frameRange]
+
+
 
 
     elif OUTPUT_REQUIRED and (not TRAJECTORY_REQUIRED):
@@ -1353,8 +1395,8 @@ def main(args):
         #region Get filters if specified
         # Get filters if specified
         filters = {}
-        if args.filterBy:
-            filters = parse_filters(args.filterBy)
+        if args.filterTrajBy:
+            filters = parse_filters(args.filterTrajBy)
             for col, val in filters.items():
                 print(f"filter: {col} = {val}")
         #endregion
@@ -2551,6 +2593,7 @@ if __name__ == "__main__":
     parser.add_argument('--topology', help='Topology file')
     parser.add_argument('--cols', nargs='+', help='Columns to be read')
     parser.add_argument('--filterBy', nargs='*', default=[], help='Optional filters in the format col=value (e.g. wIx=0)')
+    parser.add_argument('--filterTrajBy', nargs='*', default=[], help='Optional trajectory filters in the format col=value (e.g. wIx=0)')
     parser.add_argument('--useCache', action='store_true', help='Load data from cache file if it exists')
     parser.add_argument('--writeCache', action='store_true', help='Write new cache file (fails if file exists)')
     parser.add_argument('--outCacheFile', default='rex_cache.pkl', help='Path to cache file')
