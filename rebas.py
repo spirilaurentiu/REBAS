@@ -562,7 +562,7 @@ def main(args):
                                 out_df = out_df[out_df[col] == val]
                 #endregion
 
-                #out_df.info()
+                out_df.info()
                 #print("outf_df info:\n", out_df.info())
 
                 #region Panda_Study
@@ -590,6 +590,9 @@ def main(args):
                     print(f"Processing sim_type={sim_type}, seed={seed} (group {ix})")
                     #print(subdf_group)
 
+                    # Filter the sub-dataframe by wIx=0
+                    subdf_group = subdf_group[subdf_group["wIx"] == 0]
+
                     repIxs = subdf_group["replicaIx"].to_numpy()
                     theIxs = subdf_group["thermoIx"].to_numpy()
                     concatData = np.concatenate(([repIxs], [theIxs]), axis=0)
@@ -601,8 +604,18 @@ def main(args):
                         "sim_type": sim_type,
                         "seed": seed,})
 
-                print("Observvables:")
-                print(observables)
+                # Print a summary
+                SOME_PRINT_BURNIN = 0
+                print("Observables:")
+                #print(observables[0][:, SOME_PRINT_BURNIN:])
+                #print(observables[0].T[SOME_PRINT_BURNIN:])
+                for obsIx, obs in enumerate(observables):
+                    if obsIx > 1:
+                        break
+                    for obsEntryIx, obsEntry in enumerate(obs.T[SOME_PRINT_BURNIN:]):
+                        print("repIx, theIx,",  obsEntry[0], obsEntry[1])
+                        if obsEntryIx > (42):
+                            break
 
                     
                 # -----------------------------------------------------------------------------
@@ -652,7 +665,7 @@ def main(args):
                     firstTemperature = 300.0
                     firstDeltaT = 30
             
-                (observables, uniq_types, uniq_repeats, uniq_thermos) = FNManager.getTrajDataFromAllFiles(
+                (trajObservables, uniq_types, uniq_repeats, uniq_thermos) = FNManager.getTrajDataFromAllFiles(
                     obs_func,
                     filters=filters,
                     frames=frames,
@@ -660,9 +673,9 @@ def main(args):
                     verbose=False
                 )
 
-                print("observables.shape", observables.shape)
-                n_types, n_repeats, n_thermos, n_observables, n_frames = observables.shape
-                #print("observables", observables)
+                print("trajObservables.shape", trajObservables.shape)
+                n_types, n_repeats, n_thermos, n_trajObservables, n_frames = trajObservables.shape
+                #print("trajObservables", trajObservables)
                 print("uniq_types", uniq_types)
                 print("uniq_repeats", uniq_repeats)
                 print("uniq_thermos", uniq_thermos)
