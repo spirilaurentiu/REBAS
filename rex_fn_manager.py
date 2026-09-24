@@ -261,6 +261,7 @@ class REXFNManager:
             self.entries, (self.n_types, self.n_sims, self.n_reps) = self.prepareTrajArraySize(filters)
         
         uniq_sorted_types = np.unique(self.entries[:, 0].astype(int))
+        uniq_sorted_seeds = np.unique(self.entries[:, 1].astype(int)) # not used
         uniq_sorted_repeats = np.unique(self.entries[:, 2].astype(int))
         uniq_sorted_thermos = np.unique(self.entries[:, 3].astype(int))
 
