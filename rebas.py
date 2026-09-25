@@ -695,47 +695,47 @@ def main(args):
                 #print("trajFNManager entries:", trajFNManager.entries)
 
                 # Iterate simulation types
-                print("OUTPUT =====================")
                 for one_obs_meta in observables_meta:
                     out_type = one_obs_meta["sim_type"]
                     out_seed = one_obs_meta["seed"]
-                    out_repeatIx = int(out_seed) % 100
-                    print("Output sim_type,  seed, repeat:", out_type, out_seed, out_repeatIx)
+                    out_repeat = int(out_seed) % 100
+                    print("OUTPUT_ENTRY sim_type,  seed, repeat:", out_type, out_seed, out_repeat)
 
-                #region PRINT
-                # print("ENTRIES =======================")
-                # for trajEntry in trajFNManager.entries: # already sorted by prepareTrajArraySize
-                #     print("trajEntry sim_type, seed, trajRepeatIx, thermo_index",
-                #             trajEntry[0], trajEntry[1], trajEntry[2], trajEntry[3])
-                #     if (int(trajEntry[0]) != int(out_type)) or int((trajEntry[1]) != int(out_seed)):
-                #         continue
-                # print("TRAJ_SORTED TYPE =======================")
-                # for trajTypeIx in range(n_types):
-                #     trajType = uniq_types[trajTypeIx]
-                #     print("trajTypeIx, trajType:", trajTypeIx, trajType)
-                # print("TRAJ_SORTED THERMOS ===================")
-                # for thermoIx in range(n_thermos):
-                #     trajThermo = uniq_thermos[thermoIx]
-                #     print("thermoIx, trajThermo:", thermoIx, trajThermo)
-                #endregion
+                    #region PRINT
+                    # print("ENTRIES =======================")
+                    # for trajEntry in trajFNManager.entries: # already sorted by prepareTrajArraySize
+                    #     print("trajEntry sim_type, seed, trajRepeatIx, thermo_index",
+                    #             trajEntry[0], trajEntry[1], trajEntry[2], trajEntry[3])
+                    #     if (int(trajEntry[0]) != int(out_type)) or int((trajEntry[1]) != int(out_seed)):
+                    #         continue
+                    # print("TRAJ_SORTED TYPE =======================")
+                    # for trajTypeIx in range(n_types):
+                    #     trajType = uniq_types[trajTypeIx]
+                    #     print("trajTypeIx, trajType:", trajTypeIx, trajType)
+                    # print("TRAJ_SORTED THERMOS ===================")
+                    # for thermoIx in range(n_thermos):
+                    #     trajThermo = uniq_thermos[thermoIx]
+                    #     print("thermoIx, trajThermo:", thermoIx, trajThermo)
+                    #endregion
 
-                    print("TRAJ_SORTED OBSERVABLES ===============")
-                    trajObsIx = 0 # Assuming single observable for now
+                    #print("TRAJ_SORTED OBSERVABLES ===============")
                     for trajTypeIx in range(n_types):
                         trajType = uniq_types[trajTypeIx]
-                        if trajType != out_type:
+                        if int(trajType) != int(out_type):
                             continue
 
-                        for trajRepeatIx in range(n_reps):
-                            trajRepeat = uniq_repeats[trajRepeatIx]
-                            if trajRepeat != out_repeatIx:
+                        for trajRepeatIx in range(n_repeats):
+                            trajRepeat = int(uniq_repeats[trajRepeatIx])
+                            if trajRepeat != out_repeat:
                                 continue
 
                             for thermoIx in range(n_thermos):
-                                #for trajObsIx in range(n_trajObservables):
-                                    obs = trajObservables[trajTypeIx, trajRepeatIx, thermoIx, trajObsIx,:]
-                                    print("trajTypeIx, repeatIx, thermoIx, trajObsIx, obs:",
-                                        trajTypeIx, trajRepeatIx, thermoIx, trajObsIx, obs)
+
+                                for trajObsIx in range(n_trajObservables):
+                                    #trajObsIx = 0 # DELETE DELETE DELETE
+
+                                    obs = trajObservables[trajTypeIx, trajRepeatIx, thermoIx, trajObsIx, :]
+                                    print("trajTypeIx, repeatIx, thermoIx, trajObsIx, obs:", trajTypeIx, trajRepeatIx, thermoIx, trajObsIx, obs)
 
                 justThisReplIx = 0 # to be replced with a for loop
                 frameRange = range(0, 10)
