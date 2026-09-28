@@ -584,8 +584,9 @@ def main(args):
                 #endregion Panda_Study
 
                 #region Read observables
-                observables = []
-                observables_meta = []
+                out_observables = []
+                out_observables_meta = []
+                out_max_nof_replicas = 0
                 ix = -1
                 for (sim_type, seed), subdf_group in out_df.groupby(["sim_type", "seed"]):
                     ix += 1
@@ -601,23 +602,29 @@ def main(args):
                     print("============= repIxs theIxs concatData")
                     print(repIxs.shape, theIxs.shape, concatData.shape)
 
-                    observables.append(concatData)
-                    observables_meta.append({
+                    out_observables.append(concatData)
+                    out_observables_meta.append({
                         "sim_type": sim_type,
                         "seed": seed,})
 
+                    curr_max_nof_replicas = repIxs.max() + 1
+                    out_max_nof_replicas = max(out_max_nof_replicas, curr_max_nof_replicas)
+
+
+
                 # # Print a summary
-                # SOME_PRINT_BURNIN = 0
-                # print("Observables:")
-                # #print(observables[0][:, SOME_PRINT_BURNIN:])
-                # #print(observables[0].T[SOME_PRINT_BURNIN:])
-                # for obsIx, obs in enumerate(observables):
-                #     if obsIx > 1:
-                #         break
-                #     for obsEntryIx, obsEntry in enumerate(obs.T[SOME_PRINT_BURNIN:]):
-                #         print("repIx, theIx,",  obsEntry[0], obsEntry[1])
-                #         if obsEntryIx > (5):
-                #             break
+                if False:
+                    SOME_PRINT_BURNIN = 0
+                    print("Observables:")
+                    #print(out_observables[0][:, SOME_PRINT_BURNIN:])
+                    #print(out_observables[0].T[SOME_PRINT_BURNIN:])
+                    for obsIx, obs in enumerate(out_observables):
+                        if obsIx > 1:
+                            break
+                        for obsEntryIx, obsEntry in enumerate(obs.T[SOME_PRINT_BURNIN:]):
+                            print("repIx, theIx,",  obsEntry[0], obsEntry[1])
+                            if obsEntryIx > (5):
+                                break
 
                 #endregion Read observables
 
@@ -634,10 +641,10 @@ def main(args):
                 #endregion
 
                 GLOBAL_TRAJ_BURNIN = args.trajBurnin
-                GLOBAL_END = None
+                GLOBAL_TRAJ_END = None
 
                 # pick your frame slice once:
-                frames = slice(GLOBAL_TRAJ_BURNIN, GLOBAL_END)   # or slice(GLOBAL_BURNIN, None)
+                frames = slice(GLOBAL_TRAJ_BURNIN, GLOBAL_TRAJ_END)   # or slice(GLOBAL_BURNIN, None)
 
                 trajFNManager = REXFNManager(args.dir, args.inTrajFNRoots, args.cols, topology=args.topology)
                 trajFNManager.prepareTrajArraySize(filters=filters)
@@ -651,15 +658,15 @@ def main(args):
                     obs_title = "2-butanol Bonds Lengths"
                     firstTemperature = 300.0
                     firstDeltaT = 600.0
-
+                                     
                 elif args.moleculeName == "ala1":
-                    obs_func = Observables.distances
-                    obs_func_args = {"pairs": [[-1, -1]]}
-                    obs_name = Observables.distances.__name__
-                    obs_title = "Alanine dipeptide Bonds Lengths"
+                    obs_func = Observables.dihedral_a1_a2_a3_a4
+                    obs_func_args = {"a1":4, "a2":6, "a3":8, "a4":14}
+                    obs_name = Observables.dihedral_a1_a2_a3_a4.__name__
+                    obs_title = "Dihedral Angle (4,6,8,14)"
                     firstTemperature = 300.0
-                    firstDeltaT = 50.0                                        
-                
+                    firstDeltaT = 50.0
+
                 elif args.moleculeName == "trpch":
                     obs_func = Observables.distances
                     obs_func_args = {"pairs": [[8, 298]]}
@@ -668,7 +675,7 @@ def main(args):
                     firstTemperature = 300.0
                     firstDeltaT = 30
             
-                (trajObservables, uniq_types, uniq_repeats, uniq_thermos) = trajFNManager.getTrajDataFromAllFiles(
+                (trajObservables, uniq_trajtypes, uniq_trajRepeats, uniq_trajThermos) = trajFNManager.getTrajDataFromAllFiles(
                     obs_func,
                     filters=filters,
                     frames=frames,
@@ -677,73 +684,192 @@ def main(args):
                 )
 
                 print("trajObservables.shape", trajObservables.shape)
-                n_types, n_repeats, n_thermos, n_trajObservables, n_frames = trajObservables.shape
+                n_trajTypes, n_trajRepeats, n_trajThermos, n_trajObservables, n_trajFrames = trajObservables.shape
                 #print("trajObservables", trajObservables)
-                #print("uniq_types", uniq_types)
-                #print("uniq_repeats", uniq_repeats)
-                #print("uniq_thermos", uniq_thermos)
+                #print("uniq_trajtypes", uniq_trajtypes)
+                #print("uniq_trajRepeats", uniq_trajRepeats)
+                #print("uniq_trajThermos", uniq_trajThermos)
 
                 # Geometric progression along 14 replicas
                 temperatureRatio = (firstTemperature + firstDeltaT) / firstTemperature
                 Ts = [
                     firstTemperature * temperatureRatio**thermoIx
-                    for thermoIx in range(n_thermos)
+                    for thermoIx in range(n_trajThermos)
                 ]
-
 
                 #print("FNManager entries:", FNManager.entries)
                 #print("trajFNManager entries:", trajFNManager.entries)
 
-                # Iterate simulation types
-                for one_obs_meta in observables_meta:
-                    out_type = one_obs_meta["sim_type"]
-                    out_seed = one_obs_meta["seed"]
+                # Iterate simulation types: obs and obs_meta go together
+                print("WARNING: The code assumes output entry frameIx corresponds to trajectory frame frameIx.")
+                print("That alignment depends on how often output rows and DCD frames are recorded.")
+                min_output_frames = min(
+                    np.count_nonzero(obs[0] == replica_ix)
+                    for obs in out_observables
+                    for replica_ix in np.unique(obs[0])
+                )
+                max_output_frames = max(
+                    np.count_nonzero(obs[0] == replica_ix)
+                    for obs in out_observables
+                    for replica_ix in np.unique(obs[0])
+                )
+                print("min max_output_frames", min_output_frames, max_output_frames)
+                
+                merged_obs = np.empty((
+                    n_trajTypes, n_trajRepeats, n_trajThermos, n_trajObservables,
+                    max_output_frames
+                ), dtype=float) * np.nan
+
+                for out_Ix, one_obs_meta in enumerate(out_observables_meta):
+                    out_type = int(one_obs_meta["sim_type"])
+                    out_seed = int(one_obs_meta["seed"])
                     out_repeat = int(out_seed) % 100
                     print("OUTPUT_ENTRY sim_type,  seed, repeat:", out_type, out_seed, out_repeat)
 
                     #region PRINT
-                    # print("ENTRIES =======================")
-                    # for trajEntry in trajFNManager.entries: # already sorted by prepareTrajArraySize
-                    #     print("trajEntry sim_type, seed, trajRepeatIx, thermo_index",
-                    #             trajEntry[0], trajEntry[1], trajEntry[2], trajEntry[3])
-                    #     if (int(trajEntry[0]) != int(out_type)) or int((trajEntry[1]) != int(out_seed)):
-                    #         continue
-                    # print("TRAJ_SORTED TYPE =======================")
-                    # for trajTypeIx in range(n_types):
-                    #     trajType = uniq_types[trajTypeIx]
-                    #     print("trajTypeIx, trajType:", trajTypeIx, trajType)
-                    # print("TRAJ_SORTED THERMOS ===================")
-                    # for thermoIx in range(n_thermos):
-                    #     trajThermo = uniq_thermos[thermoIx]
-                    #     print("thermoIx, trajThermo:", thermoIx, trajThermo)
+                    SOME_PRINT_BURNIN = 0
+                    print("OUTPUT Observables replica to thermo:")
+                    print(out_observables[out_Ix][:, SOME_PRINT_BURNIN:])
+                    print(out_observables[out_Ix].T[SOME_PRINT_BURNIN:])
                     #endregion
 
+                    # Find the corresponding trajectory type and repeat in the trajectory data
                     #print("TRAJ_SORTED OBSERVABLES ===============")
-                    for trajTypeIx in range(n_types):
-                        trajType = uniq_types[trajTypeIx]
-                        if int(trajType) != int(out_type):
+                    trajTypeIx, trajRepeatIx = None, None
+                    trajType, trajRepeat = None, None # Just for debugging purposes
+                    for trajTypeIx in range(n_trajTypes):
+                        trajType = int(uniq_trajtypes[trajTypeIx])
+                        if trajType != out_type:
                             continue
 
-                        for trajRepeatIx in range(n_repeats):
-                            trajRepeat = int(uniq_repeats[trajRepeatIx])
+                        for trajRepeatIx in range(n_trajRepeats):
+                            trajRepeat = int(uniq_trajRepeats[trajRepeatIx])
                             if trajRepeat != out_repeat:
                                 continue
 
-                            for thermoIx in range(n_thermos):
+                            # Found the matching trajectory type and repeat
+                            break
 
-                                for trajObsIx in range(n_trajObservables):
-                                    #trajObsIx = 0 # DELETE DELETE DELETE
+                        if trajRepeatIx is not None:
+                            break
 
-                                    obs = trajObservables[trajTypeIx, trajRepeatIx, thermoIx, trajObsIx, :]
-                                    print("trajTypeIx, repeatIx, thermoIx, trajObsIx, obs:", trajTypeIx, trajRepeatIx, thermoIx, trajObsIx, obs)
+                    if trajTypeIx is None or trajRepeatIx is None:
+                        raise ValueError("Matching trajectory type and repeat not found.")
+                    else:
+                        #print("Selected trajectory type and repeat values:", trajType, trajRepeat)
 
-                justThisReplIx = 0 # to be replced with a for loop
-                frameRange = range(0, 10)
-                selected_thermoIxs = observables[0][1][
-                    observables[0][0] == justThisReplIx
-                ][frameRange]
+                        # Get back to the selected replica and its corresponding thermo indices
+                        justThisReplIx = 0 # to be replced with a for loop
+                        for justThisReplIx in range(out_max_nof_replicas): # Replace with the actual number of replicas
 
 
+
+                            #selected_thermoIxs = out_observables[out_Ix][1][ out_observables[out_Ix][0] == justThisReplIx ][frameRange]
+                            selected_thermoIxs = out_observables[out_Ix][1][ out_observables[out_Ix][0] == justThisReplIx ]
+                            
+                            #frameRange = range(0, 10)
+                            #frameRange = range(0, max_output_frames)                            
+                            frameRange = range(0, len(selected_thermoIxs))
+                            #print("Frame range for replica", justThisReplIx, ":", frameRange, "max", max_output_frames)
+                            #print("Selected thermo indices for replica", justThisReplIx, "to thermo:", selected_thermoIxs)
+
+                            for frameIx in frameRange:
+                                selected_thermoIx = selected_thermoIxs[frameIx]
+                                #print("Processing frame and thermo index:", frameIx, selected_thermoIx)
+
+                                trajObsIx = 0 # for now
+
+                                if frameIx >= np.size(trajObservables[trajTypeIx, trajRepeatIx, selected_thermoIx, trajObsIx, :]):
+                                    continue
+
+                                traj_obs = trajObservables[trajTypeIx, trajRepeatIx, selected_thermoIx, trajObsIx, frameIx]
+
+                                #print("Trajectory observable for selected frame:", trajObservables[trajTypeIx, trajRepeatIx, selected_thermoIx, trajObsIx, :])
+                                #print("Trajectory observable for selected frame (traj_obs):", traj_obs)
+
+                                merged_obs[trajTypeIx, trajRepeatIx, justThisReplIx, trajObsIx, frameIx] = traj_obs
+                            
+        print("Merged observables shape:", merged_obs.shape)
+        print("Merged observables array:", merged_obs)
+
+        # Plot merged observables for verification and color by type
+        if True:
+            fig, ax = plt.subplots()
+            for trajTypeIx in range(merged_obs.shape[0]):
+                if trajTypeIx == 0:
+                    color = 'black'
+                elif trajTypeIx == 1:
+                    color = 'red'
+                else:
+                    color = 'gray'
+                for trajRepeatIx in range(merged_obs.shape[1]):
+                    for justThisReplIx in range(merged_obs.shape[2]):
+                        for trajObsIx in range(merged_obs.shape[3]):
+                            ax.plot((merged_obs[trajTypeIx, trajRepeatIx, justThisReplIx, trajObsIx, :][20:50]),
+                                    label=f"TT{trajTypeIx}_TR{trajRepeatIx}_R{justThisReplIx}_O{trajObsIx}",
+                                    color=color)
+            ax.legend()
+            plt.show()
+
+
+            # =============================================================
+            # AUTOCORRELATION FUNCTION (ACF) Calculate
+            # =============================================================
+            #region Autocorrelation function (ACF) calculate
+            max_lag = 50000
+            BURN_IN_FOR_ACOR = 1000
+            ACF_rhos = np.full((n_trajTypes, n_trajRepeats, n_trajThermos, n_trajObservables, max_lag), fill_value=np.nan)
+            for trajTypeIx in range(n_trajTypes):
+                for trajRepeatIx in range(n_trajRepeats):
+                    for thermoIx in range(n_trajThermos):
+                        for trajObsIx in range(n_trajObservables):
+                            obs = merged_obs[trajTypeIx, trajRepeatIx, thermoIx, trajObsIx, BURN_IN_FOR_ACOR:]
+                            finite = np.isfinite(obs)
+
+                            if not finite.any():
+                                continue
+
+                            last_finite = np.flatnonzero(finite)[-1]
+                            obs = obs[:last_finite + 1]
+
+                            if not np.isfinite(obs).all():
+                                print(
+                                    f"Skipping non-contiguous observable data: "
+                                    f"type={uniq_trajtypes[trajTypeIx]}, repeat={uniq_trajRepeats[trajRepeatIx]}, "
+                                    f"thermo={uniq_trajThermos[thermoIx]}, obs={trajObsIx}"
+                                )
+                                continue
+
+                            rho, obs_tau, ess, t0_clean = stats.autocorr2_revised(
+                                obs,
+                                max_lag=max_lag,
+                                detect_equilibration=False
+                            )
+                            ACF_rhos[trajTypeIx, trajRepeatIx, thermoIx, trajObsIx, :len(rho)] = rho
+
+                            print(f"Type {uniq_trajtypes[trajTypeIx]} Repeat {uniq_trajRepeats[trajRepeatIx]} Thermo {uniq_trajThermos[thermoIx]}"
+                                  f" Obs {trajObsIx}: tau_ac={obs_tau:.3f}, ESS={ess:.3f}, t0_clean={t0_clean}")
+
+
+            # Plot ACF_rhos and color by type
+            plt.figure()
+            for trajTypeIx in range(n_trajTypes):
+                color = "black" if trajTypeIx == 1 else "red"
+                for trajRepeatIx in range(n_trajRepeats):
+                    for thermoIx in range(n_trajThermos):
+                        for trajObsIx in range(n_trajObservables):
+                            rho = ACF_rhos[trajTypeIx, trajRepeatIx, thermoIx, trajObsIx, :]
+                            if np.all(np.isnan(rho)):
+                                continue
+                            plt.plot(rho, color=color, label=f"Type {uniq_trajtypes[trajTypeIx]} Repeat {uniq_trajRepeats[trajRepeatIx]}"
+                                     f" Thermo {uniq_trajThermos[thermoIx]} Obs {trajObsIx}")
+            
+            plt.xlabel("Lag")
+            plt.ylabel("ACF")
+            plt.legend()
+            plt.show()
+
+            # endregion # Autocorrelation function (ACF) calculate
 
 
     elif OUTPUT_REQUIRED and (not TRAJECTORY_REQUIRED):
@@ -1008,24 +1134,24 @@ def main(args):
         obsStr = "PE"
         if argStr in args.figures:
 
-            observables = []
-            observables_meta = []
+            out_observables = []
+            out_observables_meta = []
             ix = -1
             for (sim_type, seed), subdf_group in out_df.groupby(["sim_type", "seed"]):
                 ix += 1
                 print(f"Processing sim_type={sim_type}, seed={seed} (group {ix})")
                 #print(subdf_group)
-                observables.append(subdf_group[argStr].to_numpy())
-                observables_meta.append({
+                out_observables.append(subdf_group[argStr].to_numpy())
+                out_observables_meta.append({
                     "sim_type": sim_type,
                     "seed": seed,})
 
             # Get a trimmed version cut at min length
-            min_num_frames = min(len(Y) for Y in observables)
-            max_num_frames = max(len(Y) for Y in observables)
-            min_glob = min(Y.min() for Y in observables)
-            max_glob = max(Y.max() for Y in observables)
-            obs_list_trimmed = np.array([Y[:min_num_frames] for Y in observables])
+            min_num_frames = min(len(Y) for Y in out_observables)
+            max_num_frames = max(len(Y) for Y in out_observables)
+            min_glob = min(Y.min() for Y in out_observables)
+            max_glob = max(Y.max() for Y in out_observables)
+            obs_list_trimmed = np.array([Y[:min_num_frames] for Y in out_observables])
 
             cumMean_list = []
             cumSom_list = []
@@ -1038,7 +1164,7 @@ def main(args):
             type1_obs = []
             type3_obs = []
             for ix, all_obss in enumerate(obs_list_trimmed):
-                sim_type = observables_meta[ix]["sim_type"]
+                sim_type = out_observables_meta[ix]["sim_type"]
                 if int(sim_type) == 1:
                     type1_obs.append(all_obss)
                 elif int(sim_type) == 3:
@@ -1072,8 +1198,8 @@ def main(args):
             PRINT__, PLOT__ = True, True
 
             if PRINT__:
-                print("observables_meta", observables_meta)
-                print("observables", observables)
+                print("observables_meta", out_observables_meta)
+                print("observables", out_observables)
                 print("Careful: trimmed to min length:", min_num_frames, ". Max length:", max_num_frames)
             if PLOT__:
                 plot1D(
@@ -1081,9 +1207,9 @@ def main(args):
                     title=obsStr,
                     xlabel="X",
                     ylabel=obsStr,
-                    labels=[f"{observables_meta[ix]['seed']} type {observables_meta[ix]['sim_type']}" \
+                    labels=[f"{out_observables_meta[ix]['seed']} type {out_observables_meta[ix]['sim_type']}" \
                             for ix in range(len(obs_list_trimmed))],
-                    colors=[colorByType(observables_meta[ix]['sim_type']) \
+                    colors=[colorByType(out_observables_meta[ix]['sim_type']) \
                             for ix in range(len(obs_list_trimmed))]
                 )
 
@@ -1095,9 +1221,9 @@ def main(args):
                     title=obsStr + " cumulative mean",
                     xlabel="X",
                     ylabel=obsStr + " cumulative mean",
-                    labels=[f"{observables_meta[ix]['seed']} type {observables_meta[ix]['sim_type']}" \
+                    labels=[f"{out_observables_meta[ix]['seed']} type {out_observables_meta[ix]['sim_type']}" \
                             for ix in range(len(cumMean_list))],
-                    colors=[colorByType(observables_meta[ix]['sim_type']) \
+                    colors=[colorByType(out_observables_meta[ix]['sim_type']) \
                             for ix in range(len(cumMean_list))]
                 )
 
@@ -1126,9 +1252,9 @@ def main(args):
                     title=obsStr + " ACF",
                     xlabel="Lag",
                     ylabel="ACF",
-                    labels=[f"{observables_meta[ix]['seed']} type {observables_meta[ix]['sim_type']}" \
+                    labels=[f"{out_observables_meta[ix]['seed']} type {out_observables_meta[ix]['sim_type']}" \
                             for ix in range(len(acf_list))],
-                    colors=[colorByType(observables_meta[ix]['sim_type']) \
+                    colors=[colorByType(out_observables_meta[ix]['sim_type']) \
                             for ix in range(len(acf_list))]
                 )
 
@@ -1140,8 +1266,8 @@ def main(args):
         #region
         if "rex_eff" in args.figures:
 
-            observables = []
-            observables_meta = []
+            out_observables = []
+            out_observables_meta = []
             nof_type1 = 0
             nof_type3 = 0
 
@@ -1176,8 +1302,8 @@ def main(args):
 
                 #print(f"obs_data", obs_data.shape, obs_data)
 
-                observables.append(obs_data)
-                observables_meta.append({
+                out_observables.append(obs_data)
+                out_observables_meta.append({
                     "sim_type": sim_type,
                     "seed": seed,
                     "replicaIx": replicaIx
@@ -1240,12 +1366,12 @@ def main(args):
                 #plt.savefig("thermoIx_by_replica.png")
 
             # Get a trimmed version cut at min length
-            min_num_frames = min(len(Y) for Y in observables)
-            max_num_frames = max(len(Y) for Y in observables)
-            min_glob = min(Y.min() for Y in observables)
-            max_glob = max(Y.max() for Y in observables)
+            min_num_frames = min(len(Y) for Y in out_observables)
+            max_num_frames = max(len(Y) for Y in out_observables)
+            min_glob = min(Y.min() for Y in out_observables)
+            max_glob = max(Y.max() for Y in out_observables)
             #obs_list_trimmed = np.array([Y[:min_num_frames] for Y in observables])
-            obs_list_trimmed = np.stack([Y[:min_num_frames] for Y in observables], axis=0)
+            obs_list_trimmed = np.stack([Y[:min_num_frames] for Y in out_observables], axis=0)
             #print(obs_list_trimmed.shape)
 
             cumMean_list = []
@@ -1261,7 +1387,7 @@ def main(args):
             #     print(f"ACF_rho shape anynan: {acf.shape}, anynan: {np.isnan(acf).any()}")
 
             # --- Convert sim types to array ---
-            sim_types = np.array([int(meta["sim_type"]) for meta in observables_meta])
+            sim_types = np.array([int(meta["sim_type"]) for meta in out_observables_meta])
 
             # Masks
             mask1 = sim_types == 1
@@ -1286,9 +1412,9 @@ def main(args):
                     title="ThermoIx trajectories (trimmed to min length)",
                     xlabel="Frame Index",
                     ylabel="thermoIx (State)",
-                    labels=[f"Seed {observables_meta[ix]['seed']} Type {observables_meta[ix]['sim_type']} Rep {observables_meta[ix]['replicaIx']}" \
+                    labels=[f"Seed {out_observables_meta[ix]['seed']} Type {out_observables_meta[ix]['sim_type']} Rep {out_observables_meta[ix]['replicaIx']}" \
                             for ix in range(len(obs_list_trimmed))],
-                    colors=[colorByType(observables_meta[ix]['sim_type']) \
+                    colors=[colorByType(out_observables_meta[ix]['sim_type']) \
                             for ix in range(len(obs_list_trimmed))],
                     ylim=(0, 13),
                     #save_path="thermoIx_trajectories.png",
@@ -1301,9 +1427,9 @@ def main(args):
             PRINT__, PLOT__ = True, False
             if PRINT__:
                 for ix, meta in enumerate(obs_list_trimmed):
-                    sim_type = observables_meta[ix]['sim_type']
-                    seed = observables_meta[ix]['seed']
-                    replicaIx = observables_meta[ix]['replicaIx']
+                    sim_type = out_observables_meta[ix]['sim_type']
+                    seed = out_observables_meta[ix]['seed']
+                    replicaIx = out_observables_meta[ix]['replicaIx']
                     print(f"sim_type={sim_type}, seed={seed},replicaIx={replicaIx}," + 
                           f" exxs: {repl_exxrs[ix]:.3f} stds: {obs_stds[ix]:.3f} skew: {obs_skews[ix]:.3f}," + 
                           f" tau_k: {obs_taus[ix]:.3f} statEnergy: {obs_statisticalEnergys[ix]:.9f}")
@@ -1320,7 +1446,7 @@ def main(args):
                         #labels=[f"Seed {observables_meta[ix]['seed']} Type {observables_meta[ix]['sim_type']}" \
                         #        for ix in range(len(cumSom_list))],
                         legend=False,
-                        colors=[colorByType(observables_meta[ix]['sim_type']) \
+                        colors=[colorByType(out_observables_meta[ix]['sim_type']) \
                                 for ix in range(len(cumSom_list))]
                     )            
                     plt.show()
@@ -1450,10 +1576,10 @@ def main(args):
         #endregion
 
         GLOBAL_TRAJ_BURNIN = args.trajBurnin
-        GLOBAL_END = None
+        GLOBAL_TRAJ_END = None
 
         # pick your frame slice once:
-        frames = slice(GLOBAL_TRAJ_BURNIN, GLOBAL_END)   # or slice(GLOBAL_BURNIN, None)
+        frames = slice(GLOBAL_TRAJ_BURNIN, GLOBAL_TRAJ_END)   # or slice(GLOBAL_BURNIN, None)
 
         FNManager = REXFNManager(args.dir, args.inTrajFNRoots, args.cols, topology=args.topology)
         FNManager.prepareTrajArraySize(filters=filters)
@@ -1494,7 +1620,7 @@ def main(args):
                     firstTemperature = 300.0
                     firstDeltaT = 30
             
-                (observables, uniq_types, uniq_repeats, uniq_thermos) = FNManager.getTrajDataFromAllFiles(
+                (out_observables, uniq_trajtypes, uniq_trajRepeats, uniq_trajThermos) = FNManager.getTrajDataFromAllFiles(
                     obs_func,
                     filters=filters,
                     frames=frames,
@@ -1502,28 +1628,28 @@ def main(args):
                     verbose=False
                 )
 
-                print("observables.shape", observables.shape)
-                n_types, n_repeats, n_thermos, n_observables, n_frames = observables.shape
+                print("observables.shape", out_observables.shape)
+                n_trajTypes, n_trajRepeats, n_trajThermos, n_observables, n_trajFrames = out_observables.shape
                 #print("observables", observables)
-                print("uniq_types", uniq_types)
-                print("uniq_repeats", uniq_repeats)
-                print("uniq_thermos", uniq_thermos)
+                print("uniq_types", uniq_trajtypes)
+                print("uniq_repeats", uniq_trajRepeats)
+                print("uniq_thermos", uniq_trajThermos)
 
                 # geometric progression along 14 replicas
                 temperatureRatio = (firstTemperature + firstDeltaT) / firstTemperature
                 Ts = [
                     firstTemperature * temperatureRatio**thermoIx
-                    for thermoIx in range(n_thermos)
+                    for thermoIx in range(n_trajThermos)
                 ]
 
                 # Define a color mapping function for replicas from blue to red
                 colorByReplica = lambda replicaIx: plt.cm.coolwarm(
-                    replicaIx / max(n_thermos - 1, 1)
+                    replicaIx / max(n_trajThermos - 1, 1)
                 )
                                 
                 # Get averages and standard deviations along the last axis (frames)
-                observables_avg = np.mean(observables, axis=-1)
-                observables_std = np.std(observables, axis=-1)
+                observables_avg = np.mean(out_observables, axis=-1)
+                observables_std = np.std(out_observables, axis=-1)
                 # print("observables_avg.shape", observables_avg.shape)
                 # print("observables_std.shape", observables_std.shape)
 
@@ -1533,7 +1659,7 @@ def main(args):
                 # region Observable averages print and plot
                 sym_type_Ix = 0
                 replicaIx = 0
-                for simIx in range(n_repeats):
+                for simIx in range(n_trajRepeats):
 
                     # Observables timeseries plots
                     PRINT__, PLOT__ = True, False
@@ -1555,8 +1681,8 @@ def main(args):
                             title=obs_title,
                             xlabel="Frame",
                             ylabel=obs_name,
-                            labels=[f"Repeat {simIx} Type {uniq_types[sym_type_Ix]} Thermo {replicaIx}" for ix in range(len(observables))],
-                            colors=[colorByType(uniq_types[sym_type_Ix]) for ix in range(len(observables))],
+                            labels=[f"Repeat {simIx} Type {uniq_trajtypes[sym_type_Ix]} Thermo {replicaIx}" for ix in range(len(out_observables))],
+                            colors=[colorByType(uniq_trajtypes[sym_type_Ix]) for ix in range(len(out_observables))],
                             #save_path=plotFN
                         )
                     
@@ -1572,13 +1698,13 @@ def main(args):
                 # region Observable std print and plot
                 sym_type_Ix = 0
                 replicaIx = 0
-                for simIx in range(n_repeats):
+                for simIx in range(n_trajRepeats):
 
                     # Observables timeseries plots
                     PRINT__, PLOT__ = False, True
                     if PRINT__:
                         print("observables_avg.shape", observables_avg.shape)
-                        for replicaIx in range(n_thermos):
+                        for replicaIx in range(n_trajThermos):
                             print(f"observables_std: {simIx}, {replicaIx}", end = ' ')
                             for ix in range(observables_std.shape[-1]):
                                 print(observables_std[0, simIx, replicaIx, ix], end = ' ')
@@ -1589,7 +1715,7 @@ def main(args):
                             plotFN = f"traj_{obs_name}.png"
 
                         plt.figure(figsize=(10, 6))
-                        for replicaIx in range(n_thermos):
+                        for replicaIx in range(n_trajThermos):
 
                             Y_series = observables_std[:, simIx, replicaIx, :]
                             
@@ -1633,11 +1759,10 @@ def main(args):
                 PRINT__, PLOT__ = False, True
                 if PRINT__:
                     print("obs_std_ratios", obs_std_ratios)
-
                 if PLOT__:
                     plt.figure(figsize=(10, 6))
 
-                    for replicaIx in range(n_thermos - 1):
+                    for replicaIx in range(n_trajThermos - 1):
                         Y_series = obs_std_ratios[0, 0, replicaIx, :]
 
                         plot1D(
@@ -1698,7 +1823,7 @@ def main(args):
                 #obs_title = "Trp-Cage PMF Indicator"
                 #(result, uniq_sorted_types, uniq_sorted_repeats, uniq_sorted_thermos)
 
-                (observables, uniq_types, uniq_repeats, uniq_thermos) = FNManager.getTrajDataFromAllFiles(
+                (out_observables, uniq_trajtypes, uniq_trajRepeats, uniq_trajThermos) = FNManager.getTrajDataFromAllFiles(
                     obs_func,
                     filters=filters,
                     frames=frames,
@@ -1708,8 +1833,8 @@ def main(args):
                     verbose=False
                 )
 
-                print("observables.shape", observables.shape)
-                n_types, n_repeats, n_thermos, n_observables, n_frames = observables.shape
+                print("observables.shape", out_observables.shape)
+                n_trajTypes, n_trajRepeats, n_trajThermos, n_observables, n_trajFrames = out_observables.shape
                 #print("observables", observables)
                 # print("u_types", u_types)
                 # print("u_repeats", u_repeats)
@@ -1717,25 +1842,25 @@ def main(args):
 
                 #region General stats
                 # Get all possible mins and maxs by type/repeat/thermo/observable
-                obs_detailed_mins = np.array([np.nanmin(observables[typeIx, repeatIx, thermoIx, obsIx,:]) \
-                                    for typeIx in range(n_types) \
-                                    for repeatIx in range(n_repeats) \
-                                    for thermoIx in range(n_thermos) \
-                                    for obsIx in range(n_observables)]).reshape((n_types, n_repeats, n_thermos, n_observables))
-                obs_detailed_maxs = np.array([np.nanmax(observables[typeIx, repeatIx, thermoIx, obsIx,:]) \
-                                    for typeIx in range(n_types) \
-                                    for repeatIx in range(n_repeats) \
-                                    for thermoIx in range(n_thermos) \
-                                    for obsIx in range(n_observables)]).reshape((n_types, n_repeats, n_thermos, n_observables))
+                obs_detailed_mins = np.array([np.nanmin(out_observables[typeIx, repeatIx, thermoIx, obsIx,:]) \
+                                    for typeIx in range(n_trajTypes) \
+                                    for repeatIx in range(n_trajRepeats) \
+                                    for thermoIx in range(n_trajThermos) \
+                                    for obsIx in range(n_observables)]).reshape((n_trajTypes, n_trajRepeats, n_trajThermos, n_observables))
+                obs_detailed_maxs = np.array([np.nanmax(out_observables[typeIx, repeatIx, thermoIx, obsIx,:]) \
+                                    for typeIx in range(n_trajTypes) \
+                                    for repeatIx in range(n_trajRepeats) \
+                                    for thermoIx in range(n_trajThermos) \
+                                    for obsIx in range(n_observables)]).reshape((n_trajTypes, n_trajRepeats, n_trajThermos, n_observables))
                 # Get mins by observable ignoring type/repeat/thermo
-                obs_mins = np.array([np.nanmin(observables[:,:,:,obsIx,:]) for obsIx in range(n_observables)])
-                obs_maxs = np.array([np.nanmax(observables[:,:,:,obsIx,:]) for obsIx in range(n_observables)])
-                obs_global_min = np.nanmin(observables)
-                obs_global_max = np.nanmax(observables)
+                obs_mins = np.array([np.nanmin(out_observables[:,:,:,obsIx,:]) for obsIx in range(n_observables)])
+                obs_maxs = np.array([np.nanmax(out_observables[:,:,:,obsIx,:]) for obsIx in range(n_observables)])
+                obs_global_min = np.nanmin(out_observables)
+                obs_global_max = np.nanmax(out_observables)
 
                 # Get standard deviation by observable ignoring type/repeat/thermo
-                obs_means = np.array([np.nanmean(observables[:,:,:,obsIx,:]) for obsIx in range(n_observables)])
-                obs_stds = np.array([np.nanstd(observables[:,:,:,obsIx,:]) for obsIx in range(n_observables)])
+                obs_means = np.array([np.nanmean(out_observables[:,:,:,obsIx,:]) for obsIx in range(n_observables)])
+                obs_stds = np.array([np.nanstd(out_observables[:,:,:,obsIx,:]) for obsIx in range(n_observables)])
                 #endregion
 
                 # =============================================================
@@ -1744,20 +1869,20 @@ def main(args):
                 # region Observables print and plot
                 replicaIx = 0
                 obsIx = 0
-                for simIx in range(n_repeats):
+                for simIx in range(n_trajRepeats):
 
                     # Observables timeseries plots
                     PRINT__, PLOT__ = True, False
                     if PRINT__:
-                        print("Unique sim types:", uniq_types)
-                        print("Unique repeats:", uniq_repeats)
-                        print("Unique thermos:", uniq_thermos)
+                        print("Unique sim types:", uniq_trajtypes)
+                        print("Unique repeats:", uniq_trajRepeats)
+                        print("Unique thermos:", uniq_trajThermos)
                     if PLOT__:
                         plotFN = None
                         if args.useAgg:
                             plotFN = f"traj_{obs_name}.png"
 
-                        Y_series = observables[:, simIx, replicaIx, obsIx,:]
+                        Y_series = out_observables[:, simIx, replicaIx, obsIx,:]
                         print(Y_series.shape)
                         
                         plot1D(
@@ -1765,8 +1890,8 @@ def main(args):
                             title=obs_title,
                             xlabel="Frame",
                             ylabel=obs_name,
-                            labels=[f"Repeat {simIx} Type {uniq_types[ix]} Thermo {replicaIx}" for ix in range(len(observables))],
-                            colors=[colorByType(uniq_types[ix]) for ix in range(len(observables))],
+                            labels=[f"Repeat {simIx} Type {uniq_trajtypes[ix]} Thermo {replicaIx}" for ix in range(len(out_observables))],
+                            colors=[colorByType(uniq_trajtypes[ix]) for ix in range(len(out_observables))],
                             save_path=plotFN
                         )
                     
@@ -1778,16 +1903,16 @@ def main(args):
                 # RUNNING MEAN and STD Calculate
                 # ============================================================= 
                 #region Running mean and std calculate
-                running_mean_obs = np.full_like(observables, fill_value=np.nan)
-                running_std_obs = np.full_like(observables, fill_value=np.nan)
+                running_mean_obs = np.full_like(out_observables, fill_value=np.nan)
+                running_std_obs = np.full_like(out_observables, fill_value=np.nan)
                 running_window = 1000  # Define the window size for running mean and std
-                print("Nof types:", n_types, "Nof repeats:", n_repeats, "Nof thermos:", n_thermos, "Nof observables:", n_observables)
+                print("Nof types:", n_trajTypes, "Nof repeats:", n_trajRepeats, "Nof thermos:", n_trajThermos, "Nof observables:", n_observables)
 
-                for typeIx in range(n_types):
-                    for repeatIx in range(n_repeats):
-                        for thermoIx in range(n_thermos):
+                for typeIx in range(n_trajTypes):
+                    for repeatIx in range(n_trajRepeats):
+                        for thermoIx in range(n_trajThermos):
                             for obsIx in range(n_observables):
-                                obs = observables[typeIx, repeatIx, thermoIx, obsIx,:]
+                                obs = out_observables[typeIx, repeatIx, thermoIx, obsIx,:]
                                 running_mean = np.convolve(obs, np.ones(running_window)/running_window, mode='valid')
                                 running_std = np.array([np.std(obs[max(0, i-running_window+1):i+1]) for i in range(len(obs))])
                                 running_mean_obs[typeIx, repeatIx, thermoIx, obsIx,:len(running_mean)] = running_mean
@@ -1805,7 +1930,7 @@ def main(args):
                 #region Running mean and std print and plot
                 replicaIx = 0
                 obsIx = 0
-                for simIx in range(n_repeats):
+                for simIx in range(n_trajRepeats):
 
                     # Running mean and std plots
                     PRINT__, PLOT__ = False, False
@@ -1821,8 +1946,8 @@ def main(args):
                             title=obs_title + " Running Mean",
                             xlabel="Frame",
                             ylabel=obs_name + " Running Mean",
-                            labels=[f"Repeat {simIx} Type {uniq_types[ix]} Thermo {replicaIx}" for ix in range(len(observables))],
-                            colors=[colorByType(uniq_types[ix]) for ix in range(len(observables))],
+                            labels=[f"Repeat {simIx} Type {uniq_trajtypes[ix]} Thermo {replicaIx}" for ix in range(len(out_observables))],
+                            colors=[colorByType(uniq_trajtypes[ix]) for ix in range(len(out_observables))],
                             save_path=f"traj_{obs_name}_running_mean.png" if args.useAgg else None
                         )
 
@@ -1831,8 +1956,8 @@ def main(args):
                             title=obs_title + " Running Std",
                             xlabel="Frame",
                             ylabel=obs_name + " Running Std",
-                            labels=[f"Repeat {simIx} Type {uniq_types[ix]} Thermo {replicaIx}" for ix in range(len(observables))],
-                            colors=[colorByType(uniq_types[ix]) for ix in range(len(observables))],
+                            labels=[f"Repeat {simIx} Type {uniq_trajtypes[ix]} Thermo {replicaIx}" for ix in range(len(out_observables))],
+                            colors=[colorByType(uniq_trajtypes[ix]) for ix in range(len(out_observables))],
                             save_path=f"traj_{obs_name}_running_std.png" if args.useAgg else None
                         )
                 # endregion # Running mean and std print and plot
@@ -1841,14 +1966,14 @@ def main(args):
                 # CUMULATIVE MEAN and STD Calculate
                 # =============================================================
                 #region Cumulative mean and std calculate
-                cummean_obs = np.full_like(observables, fill_value=np.nan)
-                cumstd_obs = np.full_like(observables, fill_value=np.nan)
+                cummean_obs = np.full_like(out_observables, fill_value=np.nan)
+                cumstd_obs = np.full_like(out_observables, fill_value=np.nan)
 
-                for typeIx in range(n_types):
-                    for repeatIx in range(n_repeats):
-                        for thermoIx in range(n_thermos):
+                for typeIx in range(n_trajTypes):
+                    for repeatIx in range(n_trajRepeats):
+                        for thermoIx in range(n_trajThermos):
                             for obsIx in range(n_observables):
-                                obs = observables[typeIx, repeatIx, thermoIx, obsIx,:]
+                                obs = out_observables[typeIx, repeatIx, thermoIx, obsIx,:]
                                 cummean = np.cumsum(obs) / (np.arange(len(obs)) + 1)
                                 cumstd = np.sqrt(np.cumsum((obs - cummean)**2) / (np.arange(len(obs)) + 1))
                                 cummean_obs[typeIx, repeatIx, thermoIx, obsIx,:] = cummean
@@ -1869,7 +1994,7 @@ def main(args):
                 #    plt.figure()
                 replicaIx = 0
                 obsIx = 0                
-                for simIx in range(n_repeats):
+                for simIx in range(n_trajRepeats):
 
                     if PRINT__:
                         print("cum_mean shape:", cummean_obs.shape)
@@ -1886,7 +2011,7 @@ def main(args):
                             xlabel="Frame",
                             ylabel=obs_name + " Cumulative Mean",
                             #labels=[f"Repeat {simIx} Type {uniq_types[ix]} Thermo {replicaIx}" for ix in range(len(observables))],
-                            colors=[colorByType(uniq_types[ix]) for ix in range(len(observables))],
+                            colors=[colorByType(uniq_trajtypes[ix]) for ix in range(len(out_observables))],
                             save_path=f"traj_{obs_name}_cum_mean.png" if args.useAgg else None
                         )
 
@@ -1897,8 +2022,8 @@ def main(args):
                             title=obs_title + " Cumulative Std",
                             xlabel="Frame",
                             ylabel=obs_name + " Cumulative Std",
-                            labels=[f"Repeat {simIx} Type {uniq_types[ix]} Thermo {replicaIx}" for ix in range(len(observables))],
-                            colors=[colorByType(uniq_types[ix]) for ix in range(len(observables))],
+                            labels=[f"Repeat {simIx} Type {uniq_trajtypes[ix]} Thermo {replicaIx}" for ix in range(len(out_observables))],
+                            colors=[colorByType(uniq_trajtypes[ix]) for ix in range(len(out_observables))],
                             save_path=f"traj_{obs_name}_cum_std.png" if args.useAgg else None
                         )
                 # endregion # Cumulative mean and std print and plot
@@ -1909,12 +2034,12 @@ def main(args):
                 #region Autocorrelation function (ACF) calculate
                 max_lag = 50000
 
-                ACF_rhos = np.full((n_types, n_repeats, n_thermos, n_observables, max_lag), fill_value=np.nan)
-                for typeIx in range(n_types):
-                    for repeatIx in range(n_repeats):
-                        for thermoIx in range(n_thermos):
+                ACF_rhos = np.full((n_trajTypes, n_trajRepeats, n_trajThermos, n_observables, max_lag), fill_value=np.nan)
+                for typeIx in range(n_trajTypes):
+                    for repeatIx in range(n_trajRepeats):
+                        for thermoIx in range(n_trajThermos):
                             for obsIx in range(n_observables):
-                                obs = observables[typeIx, repeatIx, thermoIx, obsIx,:]
+                                obs = out_observables[typeIx, repeatIx, thermoIx, obsIx,:]
                                 finite = np.isfinite(obs)
 
                                 if not finite.any():
@@ -1926,8 +2051,8 @@ def main(args):
                                 if not np.isfinite(obs).all():
                                     print(
                                         f"Skipping non-contiguous observable data: "
-                                        f"type={uniq_types[typeIx]}, repeat={uniq_repeats[repeatIx]}, "
-                                        f"thermo={uniq_thermos[thermoIx]}, obs={obsIx}"
+                                        f"type={uniq_trajtypes[typeIx]}, repeat={uniq_trajRepeats[repeatIx]}, "
+                                        f"thermo={uniq_trajThermos[thermoIx]}, obs={obsIx}"
                                     )
                                     continue
 
@@ -1938,7 +2063,7 @@ def main(args):
                                 )
                                 ACF_rhos[typeIx, repeatIx, thermoIx, obsIx, :len(rho)] = rho
 
-                                print(f"Type {uniq_types[typeIx]} Repeat {uniq_repeats[repeatIx]} Thermo {uniq_thermos[thermoIx]} Obs {obsIx}: tau_ac={obs_tau:.3f}, ESS={ess:.3f}, t0_clean={t0_clean}")
+                                print(f"Type {uniq_trajtypes[typeIx]} Repeat {uniq_trajRepeats[repeatIx]} Thermo {uniq_trajThermos[thermoIx]} Obs {obsIx}: tau_ac={obs_tau:.3f}, ESS={ess:.3f}, t0_clean={t0_clean}")
                 # endregion # Autocorrelation function (ACF) calculate
 
                 # =============================================================
@@ -1950,14 +2075,14 @@ def main(args):
                     print("ACF_rhos shape:", ACF_rhos.shape)
                 if PLOT__:
                     plt.figure()
-                    for typeIx in range(n_types):
-                        for repeatIx in range(n_repeats):
-                            for thermoIx in range(n_thermos):
+                    for typeIx in range(n_trajTypes):
+                        for repeatIx in range(n_trajRepeats):
+                            for thermoIx in range(n_trajThermos):
                                 for obsIx in range(n_observables):
                                     rhos = ACF_rhos[typeIx, repeatIx, thermoIx, obsIx,:]
                                     plt.plot(rhos,
-                                             label=f"Type {uniq_types[typeIx]} Repeat {uniq_repeats[repeatIx]} Thermo {uniq_thermos[thermoIx]}",
-                                             color=colorByType(uniq_types[typeIx]))
+                                             label=f"Type {uniq_trajtypes[typeIx]} Repeat {uniq_trajRepeats[repeatIx]} Thermo {uniq_trajThermos[thermoIx]}",
+                                             color=colorByType(uniq_trajtypes[typeIx]))
                                     # Also draw a dotted line at y = 0
                                     plt.axhline(0, linestyle=':', color='gray')
                     plt.title("Autocorrelation Function (ACF)")
@@ -2500,15 +2625,15 @@ def main(args):
 
                     bos, angs, dihs = compute_bat_values(traj, boIxs, angIxs, dihIxs)
 
-                    n_frames = traj.n_frames
-                    if n_frames < 2:
+                    n_trajFrames = traj.n_frames
+                    if n_trajFrames < 2:
                         continue
-                    max_lag = min(max_lag_cap, n_frames - 1)
+                    max_lag = min(max_lag_cap, n_trajFrames - 1)
                     traj_counter += 1
 
                     traj_label = os.path.basename(FN)
                     print(
-                        f"[circ_ACF] {traj_label}: frames={n_frames} max_lag={max_lag} kinds={','.join(requested_kinds)} "
+                        f"[circ_ACF] {traj_label}: frames={n_trajFrames} max_lag={max_lag} kinds={','.join(requested_kinds)} "
                         f"bonds={bos.shape[1]} angles={angs.shape[1]} dihedrals={dihs.shape[1]}",
                         flush=True,
                     )
