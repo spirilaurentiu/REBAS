@@ -350,14 +350,16 @@ def plot_histogram(hist_dict, title="title", xlabel="x", ylabel="Density", save_
     plt.close()
 #
 
-def stack_pad_nan(traj_obs_list):
-    max_len = max(len(x) for x in traj_obs_list)
-    arr = np.full((len(traj_obs_list), max_len), np.nan, dtype=float)
-    for i, x in enumerate(traj_obs_list):
+# Stack and pad observables with NaN for unequal lengths
+def stack_pad_nan(obs_list):
+    max_len = max(len(x) for x in obs_list)
+    arr = np.full((len(obs_list), max_len), np.nan, dtype=float)
+    for i, x in enumerate(obs_list):
         x = np.asarray(x, dtype=float)
         arr[i, :len(x)] = x
     return arr, max_len
 
+# Color coding for simulation types
 def colorByType(sim_type):
     if int(sim_type) == 1:
         return "black"
@@ -365,27 +367,140 @@ def colorByType(sim_type):
         return "red"
     else:
         return "grey"
+
+# Load output data from all files
+def load_output_data(args, burnin):
+    FNManager = None
+    if True: # Read output into out_df
+        if args.useCache and os.path.exists(args.outCacheFile):
+            print(f"Loading data from cache: {args.outCacheFile}")
+            out_df = pd.read_pickle(args.outCacheFile)
+        else:
+            FNManager = REXFNManager(args.dir, args.inFNRoots, args.cols)
+            out_df = FNManager.getDataFromAllFiles(burnin = burnin)
+
+            if args.writeCache:
+                if os.path.exists(args.outCacheFile):
+                    raise FileExistsError(f"Cache file '{args.outCacheFile}' already exists. Use a different name or delete it.")
+                print(f"Writing data to cache: {args.outCacheFile}")
+                out_df.to_pickle(args.outCacheFile)
+
+        # Apply filters if specified
+        if args.filterBy:
+            filters = parse_filters(args.filterBy)
+            for col, val in filters.items():
+                if col not in out_df.columns:
+                    raise ValueError(f"Filter column '{col}' not found in DataFrame columns.")
+                if isinstance(val, list):  # multiple OR values
+                    out_df = out_df[out_df[col].isin(val)]
+                else:  # single value
+                    out_df = out_df[out_df[col] == val]
+        
+        return out_df
+#
+
+# Get trajectory data
+def load_trajectory_data(trajFNManager, args, obs_func=None, obs_func_args=None, burnin=0, burnout=None):
+
+    if args.moleculeName not in args.dir:
+        print(f"Error: moleculeName '{args.moleculeName}' not found in directory path '{args.dir}'.")
+        exit(1)
+
+    obs_name, obs_title = None, {}, "", ""
+    obs_name2, obs_title2 = None, {}, "", ""
+
+    if args.moleculeName == "2but":
+        obs_func = Observables.distances
+        obs_func_args = {"pairs": [[-1, -1]]}
+        obs_name = Observables.distances.__name__
+        obs_title = "2-butanol Bonds Lengths"
+        firstTemperature = 300.0
+        firstDeltaT = 600.0
+
+    elif args.moleculeName == "ala1":
+        obs_func = Observables.dihedral_a1_a2_a3_a4
+        obs_func_args = {"a1":4, "a2":6, "a3":8, "a4":14}
+        obs_name = Observables.dihedral_a1_a2_a3_a4.__name__
+        obs_title = "Dihedral Angle (4,6,8,14)"
+        obs_func2 = Observables.dihedral_a1_a2_a3_a4
+        obs_func_args2 = {"a1":6, "a2":8, "a3":14, "a4":16}
+        obs_name2 = Observables.dihedral_a1_a2_a3_a4.__name__ + "_" + Observables.dihedral_a1_a2_a3_a4.__name__
+        obs_title2 = "2D PMF"            
+        firstTemperature = 300.0
+        firstDeltaT = 50.0
+
+    elif args.moleculeName == "trpch":
+        obs_func = Observables.distances
+        if "traj_stats_0D" in args.figure:
+            obs_func_args = {"pairs": [[-1, -1]]}
+        else:
+            obs_func_args = {"pairs": [[8, 298]]}
+        obs_name = Observables.distances.__name__
+        obs_title = "Trp-Cage Bonds Lengths"
+        obs_func2 = Observables.dihedral_phi_psi
+        obs_func_args2 = {"phi_psi": "phi", "resid": 11}
+        obs_name2 = Observables.distances.__name__ + "_" + Observables.dihedral_phi_psi.__name__
+        obs_title2 = "2D PMF"            
+        firstTemperature = 300.0
+        firstDeltaT = 30
+
+    elif args.moleculeName == "adk":
+        obs_func = Observables.distances
+        obs_func_args = {"pairs": [[615, 2312]]}
+        obs_name = Observables.distances.__name__
+        obs_title = "ADK AMPbd-LID Distance"
+        firstTemperature = 300.0
+        firstDeltaT = 8                    
+
+    #region Get filters if specified
+    # Get filters if specified
+    filters = {}
+    if args.filterTrajBy:
+        filters = parse_filters(args.filterTrajBy)
+        for col, val in filters.items():
+            print(f"filter: {col} = {val}")
+    #endregion
+
+    #trajFNManager = REXFNManager(args.dir, args.inTrajFNRoots, args.cols, topology=args.topology)
+    trajFNManager.prepareTrajArraySize(filters=filters)
+
+    trajObservables, uniq_trajtypes, uniq_trajRepeats, uniq_trajThermos = None, None, None, None
+
+    # GLOBAL_TRAJ_BURNIN = args.trajBurnin
+    # GLOBAL_TRAJ_END = None
+
+    # pick your frame slice once:
+    frames = slice(burnin, burnout)   # or slice(GLOBAL_BURNIN, None)
+
+    (trajObservables, uniq_trajtypes, uniq_trajRepeats, uniq_trajThermos) = trajFNManager.getTrajDataFromAllFiles(
+        obs_func,
+        filters=filters,
+        frames=frames,
+        **obs_func_args,
+        #phi_psi="psi",  # optional; only for dihedral_phi_psi
+        #resid=11,       # optional; only for dihedral_phi_psi
+        verbose=False
+    )
     
-# ============ PANDAS DOCUMENTATION ============
+    n_trajTypes, n_trajRepeats, n_trajThermos, n_observables, n_trajFrames = trajObservables.shape
+    temperatureRatio = (firstTemperature + firstDeltaT) / firstTemperature
+    Ts = [
+        firstTemperature * temperatureRatio**thermoIx
+        for thermoIx in range(n_trajThermos)
+    ]
+        
+    return [(trajObservables, uniq_trajtypes, uniq_trajRepeats, uniq_trajThermos,),
+            (obs_name, obs_title, Ts)]
+#
+
+#region ============ PANDAS DOCUMENTATION ============
 # dataframe: two-dimensional, size-mutable, potentially heterogeneous tabular data
 # grouped: pandas.core.groupby.DataFrameGroupBy object = lazy grouping object - essentially a recipe for how the DataFrame should be grouped
 # group: a tuple (name, dataframe)
-
-
-#region MAIN function for the REBAS paper. Has two types of calculations:
-#   (I)   In-house checks
-#   (II)  Figures for the paper
-# Types of files:
-#   1) OUTPUT
-#   2) TRAJECTORY
-# Types of figures:
-#   1) Validation figures
-#       1.1) Potential energy based validation
-#       1.2) Free energy based validation
-#   2) Efficiency figures
-#       2.1) Exchange rates
-#       2.2) Autocorrelation-based functions
 #endregion
+# -----------------------------------------------------------------------------
+# MAIN
+# -----------------------------------------------------------------------------
 def main(args):
 
     DRILL_REQUIRED, OUTPUT_REQUIRED, TRAJECTORY_REQUIRED = False, False, False # default flags
@@ -404,7 +519,7 @@ def main(args):
     print("OUTPUT_REQUIRED:", OUTPUT_REQUIRED)
     print("TRAJECTORY_REQUIRED:", TRAJECTORY_REQUIRED)
 
-    FNManager = None # classes
+    trajFNManager = None # classes
     out_df, traj_df = None, None # pandas
 
     stats = LS_Statistics()
@@ -530,39 +645,25 @@ def main(args):
 
         GLOBAL_OUTPUT_BURNIN = 0
 
+        # -----------------------------------------------------------------------------
+        # Read trajectory data from all files
+        # -----------------------------------------------------------------------------
+        #region Get filters if specified
+        # Get filters if specified
+        filters = {}
+        if args.filterTrajBy:
+            filters = parse_filters(args.filterTrajBy)
+            for col, val in filters.items():
+                print(f"filter: {col} = {val}")
+        #endregion
+
+        trajFNManager = REXFNManager(args.dir, args.inTrajFNRoots, args.cols, topology=args.topology)
+        trajFNManager.prepareTrajArraySize(filters=filters)
+
         if "recover_replica" in args.figures:
 
-                # -----------------------------------------------------------------------------
                 # Read output from all files
-                # -----------------------------------------------------------------------------
-                #region Read output from all files
-                FNManager = None
-                if True: # Read output into out_df
-                    if args.useCache and os.path.exists(args.outCacheFile):
-                        print(f"Loading data from cache: {args.outCacheFile}")
-                        out_df = pd.read_pickle(args.outCacheFile)
-                    else:
-                        FNManager = REXFNManager(args.dir, args.inFNRoots, args.cols)
-                        out_df = FNManager.getDataFromAllFiles(burnin = GLOBAL_OUTPUT_BURNIN)
-
-                        if args.writeCache:
-                            if os.path.exists(args.outCacheFile):
-                                raise FileExistsError(f"Cache file '{args.outCacheFile}' already exists. Use a different name or delete it.")
-                            print(f"Writing data to cache: {args.outCacheFile}")
-                            out_df.to_pickle(args.outCacheFile)
-
-                    # Apply filters if specified
-                    if args.filterBy:
-                        filters = parse_filters(args.filterBy)
-                        for col, val in filters.items():
-                            if col not in out_df.columns:
-                                raise ValueError(f"Filter column '{col}' not found in DataFrame columns.")
-                            if isinstance(val, list):  # multiple OR values
-                                out_df = out_df[out_df[col].isin(val)]
-                            else:  # single value
-                                out_df = out_df[out_df[col] == val]
-                #endregion
-
+                out_df = load_output_data(args, burnin = GLOBAL_OUTPUT_BURNIN)
                 out_df.info()
                 #print("outf_df info:\n", out_df.info())
 
@@ -584,7 +685,7 @@ def main(args):
                 #endregion Panda_Study
 
                 #region Read observables
-                out_observables = []
+                trajObservables = []
                 out_observables_meta = []
                 out_max_nof_replicas = 0
                 ix = -1
@@ -602,7 +703,7 @@ def main(args):
                     print("============= repIxs theIxs concatData")
                     print(repIxs.shape, theIxs.shape, concatData.shape)
 
-                    out_observables.append(concatData)
+                    trajObservables.append(concatData)
                     out_observables_meta.append({
                         "sim_type": sim_type,
                         "seed": seed,})
@@ -618,7 +719,7 @@ def main(args):
                     print("Observables:")
                     #print(out_observables[0][:, SOME_PRINT_BURNIN:])
                     #print(out_observables[0].T[SOME_PRINT_BURNIN:])
-                    for obsIx, obs in enumerate(out_observables):
+                    for obsIx, obs in enumerate(trajObservables):
                         if obsIx > 1:
                             break
                         for obsEntryIx, obsEntry in enumerate(obs.T[SOME_PRINT_BURNIN:]):
@@ -633,11 +734,11 @@ def main(args):
                 # -----------------------------------------------------------------------------
                 #region Get filters if specified
                 # Get filters if specified
-                filters = {}
-                if args.filterTrajBy:
-                    filters = parse_filters(args.filterTrajBy)
-                    for col, val in filters.items():
-                        print(f"filter: {col} = {val}")
+                # filters = {}
+                # if args.filterTrajBy:
+                #     filters = parse_filters(args.filterTrajBy)
+                #     for col, val in filters.items():
+                #         print(f"filter: {col} = {val}")
                 #endregion
 
                 GLOBAL_TRAJ_BURNIN = args.trajBurnin
@@ -646,32 +747,32 @@ def main(args):
                 # pick your frame slice once:
                 frames = slice(GLOBAL_TRAJ_BURNIN, GLOBAL_TRAJ_END)   # or slice(GLOBAL_BURNIN, None)
 
-                trajFNManager = REXFNManager(args.dir, args.inTrajFNRoots, args.cols, topology=args.topology)
-                trajFNManager.prepareTrajArraySize(filters=filters)
+                # trajFNManager = REXFNManager(args.dir, args.inTrajFNRoots, args.cols, topology=args.topology)
+                # trajFNManager.prepareTrajArraySize(filters=filters)
 
-                obs_func, obs_func_args, obs_name, obs_title = None, {}, "", ""
+                obs_func, obs_func_args, obs_name2, obs_title2 = None, {}, "", ""
 
                 if args.moleculeName == "2but":
                     obs_func = Observables.distances
                     obs_func_args = {"pairs": [[-1, -1]]}
-                    obs_name = Observables.distances.__name__
-                    obs_title = "2-butanol Bonds Lengths"
+                    obs_name2 = Observables.distances.__name__
+                    obs_title2 = "2-butanol Bonds Lengths"
                     firstTemperature = 300.0
                     firstDeltaT = 600.0
                                      
                 elif args.moleculeName == "ala1":
                     obs_func = Observables.dihedral_a1_a2_a3_a4
                     obs_func_args = {"a1":4, "a2":6, "a3":8, "a4":14}
-                    obs_name = Observables.dihedral_a1_a2_a3_a4.__name__
-                    obs_title = "Dihedral Angle (4,6,8,14)"
+                    obs_name2 = Observables.dihedral_a1_a2_a3_a4.__name__
+                    obs_title2 = "Dihedral Angle (4,6,8,14)"
                     firstTemperature = 300.0
                     firstDeltaT = 50.0
 
                 elif args.moleculeName == "trpch":
                     obs_func = Observables.distances
                     obs_func_args = {"pairs": [[8, 298]]}
-                    obs_name = Observables.distances.__name__
-                    obs_title = "Trp-Cage Bonds Lengths"
+                    obs_name2 = Observables.distances.__name__
+                    obs_title2 = "Trp-Cage Bonds Lengths"
                     firstTemperature = 300.0
                     firstDeltaT = 30
             
@@ -705,12 +806,12 @@ def main(args):
                 print("That alignment depends on how often output rows and DCD frames are recorded.")
                 min_output_frames = min(
                     np.count_nonzero(obs[0] == replica_ix)
-                    for obs in out_observables
+                    for obs in trajObservables
                     for replica_ix in np.unique(obs[0])
                 )
                 max_output_frames = max(
                     np.count_nonzero(obs[0] == replica_ix)
-                    for obs in out_observables
+                    for obs in trajObservables
                     for replica_ix in np.unique(obs[0])
                 )
                 print("min max_output_frames", min_output_frames, max_output_frames)
@@ -729,8 +830,8 @@ def main(args):
                     #region PRINT
                     SOME_PRINT_BURNIN = 0
                     print("OUTPUT Observables replica to thermo:")
-                    print(out_observables[out_Ix][:, SOME_PRINT_BURNIN:])
-                    print(out_observables[out_Ix].T[SOME_PRINT_BURNIN:])
+                    print(trajObservables[out_Ix][:, SOME_PRINT_BURNIN:])
+                    print(trajObservables[out_Ix].T[SOME_PRINT_BURNIN:])
                     #endregion
 
                     # Find the corresponding trajectory type and repeat in the trajectory data
@@ -765,7 +866,7 @@ def main(args):
 
 
                             #selected_thermoIxs = out_observables[out_Ix][1][ out_observables[out_Ix][0] == justThisReplIx ][frameRange]
-                            selected_thermoIxs = out_observables[out_Ix][1][ out_observables[out_Ix][0] == justThisReplIx ]
+                            selected_thermoIxs = trajObservables[out_Ix][1][ trajObservables[out_Ix][0] == justThisReplIx ]
                             
                             #frameRange = range(0, 10)
                             #frameRange = range(0, max_output_frames)                            
@@ -902,34 +1003,8 @@ def main(args):
         # -----------------------------------------------------------------------------
         # Read output from all files
         # -----------------------------------------------------------------------------
-        #region Read output from all files
-        if True: # Read output into out_df
-            if args.useCache and os.path.exists(args.outCacheFile):
-                print(f"Loading data from cache: {args.outCacheFile}")
-                out_df = pd.read_pickle(args.outCacheFile)
-            else:
-                FNManager = REXFNManager(args.dir, args.inFNRoots, args.cols)
-                out_df = FNManager.getDataFromAllFiles(burnin = GLOBAL_OUTPUT_BURNIN)
-
-                if args.writeCache:
-                    if os.path.exists(args.outCacheFile):
-                        raise FileExistsError(f"Cache file '{args.outCacheFile}' already exists. Use a different name or delete it.")
-                    print(f"Writing data to cache: {args.outCacheFile}")
-                    out_df.to_pickle(args.outCacheFile)
-
-            # Apply filters if specified
-            if args.filterBy:
-                filters = parse_filters(args.filterBy)
-                for col, val in filters.items():
-                    if col not in out_df.columns:
-                        raise ValueError(f"Filter column '{col}' not found in DataFrame columns.")
-                    if isinstance(val, list):  # multiple OR values
-                        out_df = out_df[out_df[col].isin(val)]
-                    else:  # single value
-                        out_df = out_df[out_df[col] == val]
-        #endregion
-
-        #out_df.info()
+        out_df = load_output_data(args, burnin = GLOBAL_OUTPUT_BURNIN)
+        out_df.info()
         #print("outf_df info:\n", out_df.info())
 
         #region Panda_Study
@@ -1134,24 +1209,24 @@ def main(args):
         obsStr = "PE"
         if argStr in args.figures:
 
-            out_observables = []
+            trajObservables = []
             out_observables_meta = []
             ix = -1
             for (sim_type, seed), subdf_group in out_df.groupby(["sim_type", "seed"]):
                 ix += 1
                 print(f"Processing sim_type={sim_type}, seed={seed} (group {ix})")
                 #print(subdf_group)
-                out_observables.append(subdf_group[argStr].to_numpy())
+                trajObservables.append(subdf_group[argStr].to_numpy())
                 out_observables_meta.append({
                     "sim_type": sim_type,
                     "seed": seed,})
 
             # Get a trimmed version cut at min length
-            min_num_frames = min(len(Y) for Y in out_observables)
-            max_num_frames = max(len(Y) for Y in out_observables)
-            min_glob = min(Y.min() for Y in out_observables)
-            max_glob = max(Y.max() for Y in out_observables)
-            obs_list_trimmed = np.array([Y[:min_num_frames] for Y in out_observables])
+            min_num_frames = min(len(Y) for Y in trajObservables)
+            max_num_frames = max(len(Y) for Y in trajObservables)
+            min_glob = min(Y.min() for Y in trajObservables)
+            max_glob = max(Y.max() for Y in trajObservables)
+            obs_list_trimmed = np.array([Y[:min_num_frames] for Y in trajObservables])
 
             cumMean_list = []
             cumSom_list = []
@@ -1199,7 +1274,7 @@ def main(args):
 
             if PRINT__:
                 print("observables_meta", out_observables_meta)
-                print("observables", out_observables)
+                print("observables", trajObservables)
                 print("Careful: trimmed to min length:", min_num_frames, ". Max length:", max_num_frames)
             if PLOT__:
                 plot1D(
@@ -1266,7 +1341,7 @@ def main(args):
         #region
         if "rex_eff" in args.figures:
 
-            out_observables = []
+            trajObservables = []
             out_observables_meta = []
             nof_type1 = 0
             nof_type3 = 0
@@ -1302,7 +1377,7 @@ def main(args):
 
                 #print(f"obs_data", obs_data.shape, obs_data)
 
-                out_observables.append(obs_data)
+                trajObservables.append(obs_data)
                 out_observables_meta.append({
                     "sim_type": sim_type,
                     "seed": seed,
@@ -1366,12 +1441,12 @@ def main(args):
                 #plt.savefig("thermoIx_by_replica.png")
 
             # Get a trimmed version cut at min length
-            min_num_frames = min(len(Y) for Y in out_observables)
-            max_num_frames = max(len(Y) for Y in out_observables)
-            min_glob = min(Y.min() for Y in out_observables)
-            max_glob = max(Y.max() for Y in out_observables)
+            min_num_frames = min(len(Y) for Y in trajObservables)
+            max_num_frames = max(len(Y) for Y in trajObservables)
+            min_glob = min(Y.min() for Y in trajObservables)
+            max_glob = max(Y.max() for Y in trajObservables)
             #obs_list_trimmed = np.array([Y[:min_num_frames] for Y in observables])
-            obs_list_trimmed = np.stack([Y[:min_num_frames] for Y in out_observables], axis=0)
+            obs_list_trimmed = np.stack([Y[:min_num_frames] for Y in trajObservables], axis=0)
             #print(obs_list_trimmed.shape)
 
             cumMean_list = []
@@ -1534,55 +1609,86 @@ def main(args):
 
     elif (not OUTPUT_REQUIRED) and TRAJECTORY_REQUIRED:
 
-        #region Get filters if specified
-        # Get filters if specified
-        filters = {}
-        if args.filterTrajBy:
-            filters = parse_filters(args.filterTrajBy)
-            for col, val in filters.items():
-                print(f"filter: {col} = {val}")
-        #endregion
+        # # Get trajectory data
+        # if args.moleculeName not in args.dir:
+        #     print(f"Error: moleculeName '{args.moleculeName}' not found in directory path '{args.dir}'.")
+        #     exit(1)
 
-        #region Paper figures: RMSD
-        # if "rmsd" in args.figures:
-        #     rmsd_records = []   # <-- needed
-        #     for i, traj in enumerate(traj_observables):
-        #         traj_sel = traj # No atom selection by default
-        #         reference = traj_sel[0] # Reference = first frame
-        #         rmsd_values = md.rmsd(traj_sel, reference) # Compute RMSD (nm)
-        #         meta_row = traj_metadata_df.iloc[i].to_dict() # Store results
-        #         for frame_idx, value in enumerate(rmsd_values):
-        #             rmsd_records.append({
-        #                 "traj_index": i,
-        #                 "frame": frame_idx,
-        #                 "RMSD": value,
-        #                 **meta_row
-        #             })
-        #     # Convert to DataFrame
-        #     rmsd_df = pd.DataFrame(rmsd_records)
-        #     plt.figure(figsize=(10, 6))
-        #     plt.xlabel("Frame")
-        #     plt.ylabel("RMSD (nm)")
-        #     plt.title("RMSD Over Trajectories")            
-        #     for traj_index, group in rmsd_df.groupby("traj_index"):
-        #     #for seed, group in rmsd_df.groupby("seed"):            
-        #         plt.plot(group["frame"], group["RMSD"], label=f"Traj {traj_index}")
-        #     plt.legend()
-        #     plt.grid(True)
-        #     plt.tight_layout()
-        #     #plt.show()
-        #     plt.savefig("rmsd_plot.png")
-        #     plt.close()
-        #endregion
+        # obs_func, obs_func_args, obs_name, obs_title = None, {}, "", ""
+        # obs_func, obs_func_args, obs_name2, obs_title2 = None, {}, "", ""
+
+        # if args.moleculeName == "2but":
+        #     obs_func = Observables.distances
+        #     obs_func_args = {"pairs": [[-1, -1]]}
+        #     obs_name = Observables.distances.__name__
+        #     obs_title = "2-butanol Bonds Lengths"
+        #     firstTemperature = 300.0
+        #     firstDeltaT = 600.0
+
+        # elif args.moleculeName == "ala1":
+        #     obs_func = Observables.dihedral_a1_a2_a3_a4
+        #     obs_func_args = {"a1":4, "a2":6, "a3":8, "a4":14}
+        #     obs_name = Observables.dihedral_a1_a2_a3_a4.__name__
+        #     obs_title = "Dihedral Angle (4,6,8,14)"
+        #     obs_func2 = Observables.dihedral_a1_a2_a3_a4
+        #     obs_func_args2 = {"a1":6, "a2":8, "a3":14, "a4":16}
+        #     obs_name2 = Observables.dihedral_a1_a2_a3_a4.__name__ + "_" + Observables.dihedral_a1_a2_a3_a4.__name__
+        #     obs_title2 = "2D PMF"            
+        #     firstTemperature = 300.0
+        #     firstDeltaT = 50.0
+
+        # elif args.moleculeName == "trpch":
+        #     obs_func = Observables.distances
+        #     obs_func_args = {"pairs": [[8, 298]]}
+        #     obs_name = Observables.distances.__name__
+        #     obs_title = "Trp-Cage Bonds Lengths"
+        #     obs_func2 = Observables.dihedral_phi_psi
+        #     obs_func_args2 = {"phi_psi": "phi", "resid": 11}
+        #     obs_name2 = Observables.distances.__name__ + "_" + Observables.dihedral_phi_psi.__name__
+        #     obs_title2 = "2D PMF"            
+        #     firstTemperature = 300.0
+        #     firstDeltaT = 30
+
+        # elif args.moleculeName == "adk":
+        #     obs_func = Observables.distances
+        #     obs_func_args = {"pairs": [[615, 2312]]}
+        #     obs_name = Observables.distances.__name__
+        #     obs_title = "ADK AMPbd-LID Distance"
+        #     firstTemperature = 300.0
+        #     firstDeltaT = 8                    
+
+        # #region Get filters if specified
+        # # Get filters if specified
+        # filters = {}
+        # if args.filterTrajBy:
+        #     filters = parse_filters(args.filterTrajBy)
+        #     for col, val in filters.items():
+        #         print(f"filter: {col} = {val}")
+        # #endregion
+
+        trajFNManager = REXFNManager(args.dir, args.inTrajFNRoots, args.cols, topology=args.topology)
+        # trajFNManager.prepareTrajArraySize(filters=filters)
+
+        # trajObservables, uniq_trajtypes, uniq_trajRepeats, uniq_trajThermos = None, None, None, None
 
         GLOBAL_TRAJ_BURNIN = args.trajBurnin
         GLOBAL_TRAJ_END = None
 
-        # pick your frame slice once:
-        frames = slice(GLOBAL_TRAJ_BURNIN, GLOBAL_TRAJ_END)   # or slice(GLOBAL_BURNIN, None)
+        # # pick your frame slice once:
+        # frames = slice(GLOBAL_TRAJ_BURNIN, GLOBAL_TRAJ_END)   # or slice(GLOBAL_BURNIN, None)
 
-        FNManager = REXFNManager(args.dir, args.inTrajFNRoots, args.cols, topology=args.topology)
-        FNManager.prepareTrajArraySize(filters=filters)
+        # (trajObservables, uniq_trajtypes, uniq_trajRepeats, uniq_trajThermos) = trajFNManager.getTrajDataFromAllFiles(
+        #     obs_func,
+        #     filters=filters,
+        #     frames=frames,
+        #     **obs_func_args,
+        #     #phi_psi="psi",  # optional; only for dihedral_phi_psi
+        #     #resid=11,       # optional; only for dihedral_phi_psi
+        #     verbose=False
+        # )
+        
+        [(trajObservables, uniq_trajtypes, uniq_trajRepeats, uniq_trajThermos),
+            (obs_name, obs_title, Ts)] = load_trajectory_data(trajFNManager, args, burnin=GLOBAL_TRAJ_BURNIN, burnout=GLOBAL_TRAJ_END)
 
         # Preliminary statistics
         if "traj_stats_0D" in args.figures:
@@ -1593,54 +1699,49 @@ def main(args):
                 # if args.moleculeName not in args.dir:
                 #     print(f"Error: moleculeName '{args.moleculeName}' not found in directory path '{args.dir}'.")
                 #     exit(1)
+                #obs_func, obs_func_args, obs_name2, obs_title2 = None, {}, "", ""
+                # if args.moleculeName == "2but":
+                #     obs_func = Observables.distances
+                #     obs_func_args = {"pairs": [[-1, -1]]}
+                #     obs_name2 = Observables.distances.__name__
+                #     obs_title2 = "2-butanol Bonds Lengths"
+                #     firstTemperature = 300.0
+                #     firstDeltaT = 600.0
+                # elif args.moleculeName == "ala1":
+                #     obs_func = Observables.distances
+                #     obs_func_args = {"pairs": [[-1, -1]]}
+                #     obs_name2 = Observables.distances.__name__
+                #     obs_title2 = "Alanine dipeptide Bonds Lengths"
+                #     firstTemperature = 300.0
+                #     firstDeltaT = 50.0                                        
+                # elif args.moleculeName == "trpch":
+                #     obs_func = Observables.distances
+                #     obs_func_args = {"pairs": [[-1, -1]]}
+                #     obs_name2 = Observables.distances.__name__
+                #     obs_title2 = "Trp-Cage Bonds Lengths"
+                #     firstTemperature = 300.0
+                #     firstDeltaT = 30
+                # (trajObservables, uniq_trajtypes, uniq_trajRepeats, uniq_trajThermos) = trajFNManager.getTrajDataFromAllFiles(
+                #     obs_func,
+                #     filters=filters,
+                #     frames=frames,
+                #     **obs_func_args,
+                #     verbose=False
+                # )
 
-                obs_func, obs_func_args, obs_name, obs_title = None, {}, "", ""
-
-                if args.moleculeName == "2but":
-                    obs_func = Observables.distances
-                    obs_func_args = {"pairs": [[-1, -1]]}
-                    obs_name = Observables.distances.__name__
-                    obs_title = "2-butanol Bonds Lengths"
-                    firstTemperature = 300.0
-                    firstDeltaT = 600.0
-
-                elif args.moleculeName == "ala1":
-                    obs_func = Observables.distances
-                    obs_func_args = {"pairs": [[-1, -1]]}
-                    obs_name = Observables.distances.__name__
-                    obs_title = "Alanine dipeptide Bonds Lengths"
-                    firstTemperature = 300.0
-                    firstDeltaT = 50.0                                        
-                
-                elif args.moleculeName == "trpch":
-                    obs_func = Observables.distances
-                    obs_func_args = {"pairs": [[-1, -1]]}
-                    obs_name = Observables.distances.__name__
-                    obs_title = "Trp-Cage Bonds Lengths"
-                    firstTemperature = 300.0
-                    firstDeltaT = 30
-            
-                (out_observables, uniq_trajtypes, uniq_trajRepeats, uniq_trajThermos) = FNManager.getTrajDataFromAllFiles(
-                    obs_func,
-                    filters=filters,
-                    frames=frames,
-                    **obs_func_args,
-                    verbose=False
-                )
-
-                print("observables.shape", out_observables.shape)
-                n_trajTypes, n_trajRepeats, n_trajThermos, n_observables, n_trajFrames = out_observables.shape
+                print("observables.shape", trajObservables.shape)
+                n_trajTypes, n_trajRepeats, n_trajThermos, n_observables, n_trajFrames = trajObservables.shape
                 #print("observables", observables)
                 print("uniq_types", uniq_trajtypes)
                 print("uniq_repeats", uniq_trajRepeats)
                 print("uniq_thermos", uniq_trajThermos)
 
                 # geometric progression along 14 replicas
-                temperatureRatio = (firstTemperature + firstDeltaT) / firstTemperature
-                Ts = [
-                    firstTemperature * temperatureRatio**thermoIx
-                    for thermoIx in range(n_trajThermos)
-                ]
+                # temperatureRatio = (firstTemperature + firstDeltaT) / firstTemperature
+                # Ts = [
+                #     firstTemperature * temperatureRatio**thermoIx
+                #     for thermoIx in range(n_trajThermos)
+                # ]
 
                 # Define a color mapping function for replicas from blue to red
                 colorByReplica = lambda replicaIx: plt.cm.coolwarm(
@@ -1648,8 +1749,8 @@ def main(args):
                 )
                                 
                 # Get averages and standard deviations along the last axis (frames)
-                observables_avg = np.mean(out_observables, axis=-1)
-                observables_std = np.std(out_observables, axis=-1)
+                observables_avg = np.mean(trajObservables, axis=-1)
+                observables_std = np.std(trajObservables, axis=-1)
                 # print("observables_avg.shape", observables_avg.shape)
                 # print("observables_std.shape", observables_std.shape)
 
@@ -1681,8 +1782,8 @@ def main(args):
                             title=obs_title,
                             xlabel="Frame",
                             ylabel=obs_name,
-                            labels=[f"Repeat {simIx} Type {uniq_trajtypes[sym_type_Ix]} Thermo {replicaIx}" for ix in range(len(out_observables))],
-                            colors=[colorByType(uniq_trajtypes[sym_type_Ix]) for ix in range(len(out_observables))],
+                            labels=[f"Repeat {simIx} Type {uniq_trajtypes[sym_type_Ix]} Thermo {replicaIx}" for ix in range(len(trajObservables))],
+                            colors=[colorByType(uniq_trajtypes[sym_type_Ix]) for ix in range(len(trajObservables))],
                             #save_path=plotFN
                         )
                     
@@ -1712,7 +1813,7 @@ def main(args):
                     if PLOT__:
                         plotFN = None
                         if args.useAgg:
-                            plotFN = f"traj_{obs_name}.png"
+                            plotFN = f"traj_{obs_name2}.png"
 
                         plt.figure(figsize=(10, 6))
                         for replicaIx in range(n_trajThermos):
@@ -1727,7 +1828,7 @@ def main(args):
                                 xlabel="bond index",
                                 ylabel=obs_name + " (std)",
                                 #labels=[f"{Ts[replicaIx]} K"],
-                                colors=[colorByReplica(replicaIx)],
+                                colors=[colorByReplica(replicaIx)] * len(Y_series),
                                 instantiateFigure=False,
                                 marker="o",
                                 #save_path=plotFN
@@ -1795,46 +1896,11 @@ def main(args):
 
             if DO_GEOMETRY:
 
-                # Get trajectory data
-                if args.moleculeName not in args.dir:
-                    print(f"Error: moleculeName '{args.moleculeName}' not found in directory path '{args.dir}'.")
-                    exit(1)
-
-                obs_func, obs_func_args, obs_name, obs_title = None, {}, "", ""
-
-                if args.moleculeName == "trpch":
-                    obs_func = Observables.distances
-                    obs_func_args = {"pairs": [[8, 298]]}
-                    obs_name = Observables.distances.__name__
-                    obs_title = "End-to-End Distance"
-
-                elif args.moleculeName == "ala1":
-                    obs_func = Observables.dihedral_a1_a2_a3_a4
-                    obs_func_args = {"a1":4, "a2":6, "a3":8, "a4":14}
-                    obs_name = Observables.dihedral_a1_a2_a3_a4.__name__
-                    obs_title = "Dihedral Angle (4,6,8,14)"
-
-                elif args.moleculeName == "adk":
-                    obs_func = Observables.distances
-                    obs_func_args = {"pairs": [[615, 2312]]}
-                    obs_name = Observables.distances.__name__
-                    obs_title = "ADK AMPbd-LID Distance"
-
                 #obs_title = "Trp-Cage PMF Indicator"
                 #(result, uniq_sorted_types, uniq_sorted_repeats, uniq_sorted_thermos)
 
-                (out_observables, uniq_trajtypes, uniq_trajRepeats, uniq_trajThermos) = FNManager.getTrajDataFromAllFiles(
-                    obs_func,
-                    filters=filters,
-                    frames=frames,
-                    **obs_func_args,
-                    #phi_psi="psi",  # optional; only for dihedral_phi_psi
-                    #resid=11,       # optional; only for dihedral_phi_psi
-                    verbose=False
-                )
-
-                print("observables.shape", out_observables.shape)
-                n_trajTypes, n_trajRepeats, n_trajThermos, n_observables, n_trajFrames = out_observables.shape
+                print("observables.shape", trajObservables.shape)
+                n_trajTypes, n_trajRepeats, n_trajThermos, n_observables, n_trajFrames = trajObservables.shape
                 #print("observables", observables)
                 # print("u_types", u_types)
                 # print("u_repeats", u_repeats)
@@ -1842,25 +1908,25 @@ def main(args):
 
                 #region General stats
                 # Get all possible mins and maxs by type/repeat/thermo/observable
-                obs_detailed_mins = np.array([np.nanmin(out_observables[typeIx, repeatIx, thermoIx, obsIx,:]) \
+                obs_detailed_mins = np.array([np.nanmin(trajObservables[typeIx, repeatIx, thermoIx, obsIx,:]) \
                                     for typeIx in range(n_trajTypes) \
                                     for repeatIx in range(n_trajRepeats) \
                                     for thermoIx in range(n_trajThermos) \
                                     for obsIx in range(n_observables)]).reshape((n_trajTypes, n_trajRepeats, n_trajThermos, n_observables))
-                obs_detailed_maxs = np.array([np.nanmax(out_observables[typeIx, repeatIx, thermoIx, obsIx,:]) \
+                obs_detailed_maxs = np.array([np.nanmax(trajObservables[typeIx, repeatIx, thermoIx, obsIx,:]) \
                                     for typeIx in range(n_trajTypes) \
                                     for repeatIx in range(n_trajRepeats) \
                                     for thermoIx in range(n_trajThermos) \
                                     for obsIx in range(n_observables)]).reshape((n_trajTypes, n_trajRepeats, n_trajThermos, n_observables))
                 # Get mins by observable ignoring type/repeat/thermo
-                obs_mins = np.array([np.nanmin(out_observables[:,:,:,obsIx,:]) for obsIx in range(n_observables)])
-                obs_maxs = np.array([np.nanmax(out_observables[:,:,:,obsIx,:]) for obsIx in range(n_observables)])
-                obs_global_min = np.nanmin(out_observables)
-                obs_global_max = np.nanmax(out_observables)
+                obs_mins = np.array([np.nanmin(trajObservables[:,:,:,obsIx,:]) for obsIx in range(n_observables)])
+                obs_maxs = np.array([np.nanmax(trajObservables[:,:,:,obsIx,:]) for obsIx in range(n_observables)])
+                obs_global_min = np.nanmin(trajObservables)
+                obs_global_max = np.nanmax(trajObservables)
 
                 # Get standard deviation by observable ignoring type/repeat/thermo
-                obs_means = np.array([np.nanmean(out_observables[:,:,:,obsIx,:]) for obsIx in range(n_observables)])
-                obs_stds = np.array([np.nanstd(out_observables[:,:,:,obsIx,:]) for obsIx in range(n_observables)])
+                obs_means = np.array([np.nanmean(trajObservables[:,:,:,obsIx,:]) for obsIx in range(n_observables)])
+                obs_stds = np.array([np.nanstd(trajObservables[:,:,:,obsIx,:]) for obsIx in range(n_observables)])
                 #endregion
 
                 # =============================================================
@@ -1880,18 +1946,18 @@ def main(args):
                     if PLOT__:
                         plotFN = None
                         if args.useAgg:
-                            plotFN = f"traj_{obs_name}.png"
+                            plotFN = f"traj_{obs_name2}.png"
 
-                        Y_series = out_observables[:, simIx, replicaIx, obsIx,:]
+                        Y_series = trajObservables[:, simIx, replicaIx, obsIx,:]
                         print(Y_series.shape)
                         
                         plot1D(
                             Y = Y_series,
-                            title=obs_title,
+                            title=obs_title2,
                             xlabel="Frame",
-                            ylabel=obs_name,
-                            labels=[f"Repeat {simIx} Type {uniq_trajtypes[ix]} Thermo {replicaIx}" for ix in range(len(out_observables))],
-                            colors=[colorByType(uniq_trajtypes[ix]) for ix in range(len(out_observables))],
+                            ylabel=obs_name2,
+                            labels=[f"Repeat {simIx} Type {uniq_trajtypes[ix]} Thermo {replicaIx}" for ix in range(len(trajObservables))],
+                            colors=[colorByType(uniq_trajtypes[ix]) for ix in range(len(trajObservables))],
                             save_path=plotFN
                         )
                     
@@ -1903,8 +1969,8 @@ def main(args):
                 # RUNNING MEAN and STD Calculate
                 # ============================================================= 
                 #region Running mean and std calculate
-                running_mean_obs = np.full_like(out_observables, fill_value=np.nan)
-                running_std_obs = np.full_like(out_observables, fill_value=np.nan)
+                running_mean_obs = np.full_like(trajObservables, fill_value=np.nan)
+                running_std_obs = np.full_like(trajObservables, fill_value=np.nan)
                 running_window = 1000  # Define the window size for running mean and std
                 print("Nof types:", n_trajTypes, "Nof repeats:", n_trajRepeats, "Nof thermos:", n_trajThermos, "Nof observables:", n_observables)
 
@@ -1912,7 +1978,7 @@ def main(args):
                     for repeatIx in range(n_trajRepeats):
                         for thermoIx in range(n_trajThermos):
                             for obsIx in range(n_observables):
-                                obs = out_observables[typeIx, repeatIx, thermoIx, obsIx,:]
+                                obs = trajObservables[typeIx, repeatIx, thermoIx, obsIx,:]
                                 running_mean = np.convolve(obs, np.ones(running_window)/running_window, mode='valid')
                                 running_std = np.array([np.std(obs[max(0, i-running_window+1):i+1]) for i in range(len(obs))])
                                 running_mean_obs[typeIx, repeatIx, thermoIx, obsIx,:len(running_mean)] = running_mean
@@ -1943,22 +2009,22 @@ def main(args):
                             Y=running_mean_obs[:, simIx, replicaIx, obsIx,:],
                             #ylim=ylim,
                             instantiateFigure=True,
-                            title=obs_title + " Running Mean",
+                            title=obs_title2 + " Running Mean",
                             xlabel="Frame",
-                            ylabel=obs_name + " Running Mean",
-                            labels=[f"Repeat {simIx} Type {uniq_trajtypes[ix]} Thermo {replicaIx}" for ix in range(len(out_observables))],
-                            colors=[colorByType(uniq_trajtypes[ix]) for ix in range(len(out_observables))],
-                            save_path=f"traj_{obs_name}_running_mean.png" if args.useAgg else None
+                            ylabel=obs_name2 + " Running Mean",
+                            labels=[f"Repeat {simIx} Type {uniq_trajtypes[ix]} Thermo {replicaIx}" for ix in range(len(trajObservables))],
+                            colors=[colorByType(uniq_trajtypes[ix]) for ix in range(len(trajObservables))],
+                            save_path=f"traj_{obs_name2}_running_mean.png" if args.useAgg else None
                         )
 
                         plot1D(
                             Y=running_std_obs[:, simIx, replicaIx, obsIx,:],
-                            title=obs_title + " Running Std",
+                            title=obs_title2 + " Running Std",
                             xlabel="Frame",
-                            ylabel=obs_name + " Running Std",
-                            labels=[f"Repeat {simIx} Type {uniq_trajtypes[ix]} Thermo {replicaIx}" for ix in range(len(out_observables))],
-                            colors=[colorByType(uniq_trajtypes[ix]) for ix in range(len(out_observables))],
-                            save_path=f"traj_{obs_name}_running_std.png" if args.useAgg else None
+                            ylabel=obs_name2 + " Running Std",
+                            labels=[f"Repeat {simIx} Type {uniq_trajtypes[ix]} Thermo {replicaIx}" for ix in range(len(trajObservables))],
+                            colors=[colorByType(uniq_trajtypes[ix]) for ix in range(len(trajObservables))],
+                            save_path=f"traj_{obs_name2}_running_std.png" if args.useAgg else None
                         )
                 # endregion # Running mean and std print and plot
                 
@@ -1966,14 +2032,14 @@ def main(args):
                 # CUMULATIVE MEAN and STD Calculate
                 # =============================================================
                 #region Cumulative mean and std calculate
-                cummean_obs = np.full_like(out_observables, fill_value=np.nan)
-                cumstd_obs = np.full_like(out_observables, fill_value=np.nan)
+                cummean_obs = np.full_like(trajObservables, fill_value=np.nan)
+                cumstd_obs = np.full_like(trajObservables, fill_value=np.nan)
 
                 for typeIx in range(n_trajTypes):
                     for repeatIx in range(n_trajRepeats):
                         for thermoIx in range(n_trajThermos):
                             for obsIx in range(n_observables):
-                                obs = out_observables[typeIx, repeatIx, thermoIx, obsIx,:]
+                                obs = trajObservables[typeIx, repeatIx, thermoIx, obsIx,:]
                                 cummean = np.cumsum(obs) / (np.arange(len(obs)) + 1)
                                 cumstd = np.sqrt(np.cumsum((obs - cummean)**2) / (np.arange(len(obs)) + 1))
                                 cummean_obs[typeIx, repeatIx, thermoIx, obsIx,:] = cummean
@@ -2007,24 +2073,24 @@ def main(args):
                             Y=cummean_obs[:, simIx, replicaIx, obsIx,:],
                             ylim=ylim,
                             instantiateFigure=False,
-                            title=obs_title + " Cumulative Mean",
+                            title=obs_title2 + " Cumulative Mean",
                             xlabel="Frame",
-                            ylabel=obs_name + " Cumulative Mean",
+                            ylabel=obs_name2 + " Cumulative Mean",
                             #labels=[f"Repeat {simIx} Type {uniq_types[ix]} Thermo {replicaIx}" for ix in range(len(observables))],
-                            colors=[colorByType(uniq_trajtypes[ix]) for ix in range(len(out_observables))],
-                            save_path=f"traj_{obs_name}_cum_mean.png" if args.useAgg else None
+                            colors=[colorByType(uniq_trajtypes[ix]) for ix in range(len(trajObservables))],
+                            save_path=f"traj_{obs_name2}_cum_mean.png" if args.useAgg else None
                         )
 
                         plt.figure()
                         plot1D(
                             Y=cumstd_obs[:, simIx, replicaIx, obsIx,:],
                             instantiateFigure=False,
-                            title=obs_title + " Cumulative Std",
+                            title=obs_title2 + " Cumulative Std",
                             xlabel="Frame",
-                            ylabel=obs_name + " Cumulative Std",
-                            labels=[f"Repeat {simIx} Type {uniq_trajtypes[ix]} Thermo {replicaIx}" for ix in range(len(out_observables))],
-                            colors=[colorByType(uniq_trajtypes[ix]) for ix in range(len(out_observables))],
-                            save_path=f"traj_{obs_name}_cum_std.png" if args.useAgg else None
+                            ylabel=obs_name2 + " Cumulative Std",
+                            labels=[f"Repeat {simIx} Type {uniq_trajtypes[ix]} Thermo {replicaIx}" for ix in range(len(trajObservables))],
+                            colors=[colorByType(uniq_trajtypes[ix]) for ix in range(len(trajObservables))],
+                            save_path=f"traj_{obs_name2}_cum_std.png" if args.useAgg else None
                         )
                 # endregion # Cumulative mean and std print and plot
 
@@ -2039,7 +2105,7 @@ def main(args):
                     for repeatIx in range(n_trajRepeats):
                         for thermoIx in range(n_trajThermos):
                             for obsIx in range(n_observables):
-                                obs = out_observables[typeIx, repeatIx, thermoIx, obsIx,:]
+                                obs = trajObservables[typeIx, repeatIx, thermoIx, obsIx,:]
                                 finite = np.isfinite(obs)
 
                                 if not finite.any():
@@ -2059,7 +2125,7 @@ def main(args):
                                 rho, obs_tau, ess, t0_clean = stats.autocorr2_revised(
                                     obs,
                                     max_lag=max_lag,
-                                    detect_equilibration=True
+                                    detect_equilibration=False
                                 )
                                 ACF_rhos[typeIx, repeatIx, thermoIx, obsIx, :len(rho)] = rho
 
@@ -2091,7 +2157,7 @@ def main(args):
                     plt.legend()
                     plt.tight_layout()
                     if args.useAgg:
-                        plt.savefig(f"traj_{obs_name}_acf.png")
+                        plt.savefig(f"traj_{obs_name2}_acf.png")
                 # endregion Autocorrelation function (ACF) print and plot
 
                 # Finish plots
@@ -2104,7 +2170,7 @@ def main(args):
                 # Principal component analysis (PCA) = linear combination of coords with highest variance
                 from sklearn.decomposition import PCA
                 (result, types, repeats, thermos) = \
-                FNManager.PCA(filters=filters, frames=frames, verbose=True)
+                trajFNManager.PCA(filters=filters, frames=frames, verbose=True)
 
                 # traj_infos = [entry['traj_info'] for entry in result]
                 all_projections = [entry['projection'] for entry in result]
@@ -2220,7 +2286,7 @@ def main(args):
                         s=0.5,
                     )
 
-                MSM_typeIx_0, MSM_typeIx_1 = FNManager.MSM(result, lag=1,  n_states=10, verbose=True)
+                MSM_typeIx_0, MSM_typeIx_1 = trajFNManager.MSM(result, lag=1,  n_states=10, verbose=True)
 
                 #all_repeats all_thermoIxs 
 
@@ -2309,36 +2375,35 @@ def main(args):
         if "traj_stats_2D" in args.figures:
 
             # 2D histogram of two observables
-            obs_func1, obs_func_args1, obs_name1, obs_title1 = None, {}, "", ""
+            #trajObservables, uniq_trajtypes, uniq_trajRepeats, uniq_trajThermos = None, None, None, None
+            obs_func, obs_func_args, obs_name, obs_title = None, {}, "", ""
             obs_func2, obs_func_args2, obs_name2, obs_title2 = None, {}, "", ""
 
             if args.moleculeName == "trpch":
-                obs_func1 = Observables.distances
-                obs_func_args1 = {"pairs": [[8, 298]]}
+                obs_func = Observables.distances
+                obs_func_args = {"pairs": [[8, 298]]}
                 obs_func2 = Observables.dihedral_phi_psi
                 obs_func_args2 = {"phi_psi": "phi", "resid": 11}
-
-                obs_name = Observables.distances.__name__ + "_" + Observables.dihedral_phi_psi.__name__
-                obs_title = "2D"
+                obs_name2 = Observables.distances.__name__ + "_" + Observables.dihedral_phi_psi.__name__
+                obs_title2 = "2D"
 
             elif args.moleculeName == "ala1":
-                obs_func1 = Observables.dihedral_a1_a2_a3_a4
-                obs_func_args1 = {"a1":4, "a2":6, "a3":8, "a4":14}
+                obs_func = Observables.dihedral_a1_a2_a3_a4
+                obs_func_args = {"a1":4, "a2":6, "a3":8, "a4":14}
                 obs_func2 = Observables.dihedral_a1_a2_a3_a4
                 obs_func_args2 = {"a1":6, "a2":8, "a3":14, "a4":16}
+                obs_name2 = Observables.dihedral_a1_a2_a3_a4.__name__ + "_" + Observables.dihedral_a1_a2_a3_a4.__name__
+                obs_title2 = "2D"
 
-                obs_name = Observables.dihedral_a1_a2_a3_a4.__name__ + "_" + Observables.dihedral_a1_a2_a3_a4.__name__
-                obs_title = "2D"
-
-            (observables1, uniq_types1, uniq_repeats1, uniq_thermos1) = FNManager.getTrajDataFromAllFiles(
-                obs_func1,
+            (trajObservables, uniq_trajtypes, uniq_trajRepeats, uniq_trajThermos) = trajFNManager.getTrajDataFromAllFiles(
+                obs_func,
                 filters=filters,
                 frames=frames,
-                **obs_func_args1,
+                **obs_func_args,
                 verbose=False
             )
 
-            (observables2, uniq_types2, uniq_repeats2, uniq_thermos2) = FNManager.getTrajDataFromAllFiles(
+            (observables2, uniq_types2, uniq_repeats2, uniq_thermos2) = trajFNManager.getTrajDataFromAllFiles(
                 obs_func2,
                 filters=filters,
                 frames=frames,
@@ -2350,12 +2415,12 @@ def main(args):
             #print(uniq_types1, uniq_repeats1, uniq_thermos1)
 
             # Filter invalid pairs once so the filtered observables can be reused later.
-            filtered_observables1 = np.full_like(observables1, np.nan, dtype=float)
+            filtered_observables1 = np.full_like(trajObservables, np.nan, dtype=float)
             filtered_observables2 = np.full_like(observables2, np.nan, dtype=float)
-            for typeIx in range(len(uniq_types1)):
-                for repeatIx in range(len(uniq_repeats1)):
-                    for thermoIx in range(len(uniq_thermos1)):
-                        X = observables1[typeIx, repeatIx, thermoIx, 0, :]
+            for typeIx in range(len(uniq_trajtypes)):
+                for repeatIx in range(len(uniq_trajRepeats)):
+                    for thermoIx in range(len(uniq_trajThermos)):
+                        X = trajObservables[typeIx, repeatIx, thermoIx, 0, :]
                         Y = observables2[typeIx, repeatIx, thermoIx, 0, :]
                         valid = np.isfinite(X) & np.isfinite(Y)
                         filtered_observables1[typeIx, repeatIx, thermoIx, 0, valid] = X[valid]
@@ -2370,12 +2435,12 @@ def main(args):
 
             # Calculate 2D histograms, transition probabilities and mean first passage times (MFPTs)
             nofBins_2D = 72  # Number of bins for 2D histograms
-            hists_2D = np.zeros((len(uniq_types1), len(uniq_repeats1), len(uniq_thermos1), nofBins_2D, nofBins_2D))
+            hists_2D = np.zeros((len(uniq_trajtypes), len(uniq_trajRepeats), len(uniq_trajThermos), nofBins_2D, nofBins_2D))
             PMFs_2D = np.full_like(hists_2D, np.nan, dtype=float)
 
-            for typeIx in range(len(uniq_types1)):
-                for repeatIx in range(len(uniq_repeats1)):
-                    for thermoIx in range(len(uniq_thermos1)):
+            for typeIx in range(len(uniq_trajtypes)):
+                for repeatIx in range(len(uniq_trajRepeats)):
+                    for thermoIx in range(len(uniq_trajThermos)):
                         X = filtered_observables1[typeIx, repeatIx, thermoIx, 0, :]
                         Y = filtered_observables2[typeIx, repeatIx, thermoIx, 0, :]
 
@@ -2431,12 +2496,12 @@ def main(args):
                         labels[mask] = bIx
                     return labels
 
-                T_basin_storage = np.empty((len(uniq_types1), len(uniq_repeats1), len(uniq_thermos1), n_basins, n_basins), dtype=float)
-                T_avg_byRep = np.empty((len(uniq_types1), len(uniq_thermos1), n_basins, n_basins), dtype=float)
-                for typeIx in range(len(uniq_types1)):
-                    for repeatIx in range(len(uniq_repeats1)):
-                        for thermoIx in range(len(uniq_thermos1)):
-                            print(f"Type {uniq_types1[typeIx]} Repeat {uniq_repeats1[repeatIx]} Thermo {uniq_thermos1[thermoIx]}")
+                T_basin_storage = np.empty((len(uniq_trajtypes), len(uniq_trajRepeats), len(uniq_trajThermos), n_basins, n_basins), dtype=float)
+                T_avg_byRep = np.empty((len(uniq_trajtypes), len(uniq_trajThermos), n_basins, n_basins), dtype=float)
+                for typeIx in range(len(uniq_trajtypes)):
+                    for repeatIx in range(len(uniq_trajRepeats)):
+                        for thermoIx in range(len(uniq_trajThermos)):
+                            print(f"Type {uniq_trajtypes[typeIx]} Repeat {uniq_trajRepeats[repeatIx]} Thermo {uniq_trajThermos[thermoIx]}")
 
                             phi = filtered_observables1[typeIx, repeatIx, thermoIx, 0, :]
                             psi = filtered_observables2[typeIx, repeatIx, thermoIx, 0, :]
@@ -2483,14 +2548,14 @@ def main(args):
                             print()
 
                             # Calculate the mean first passage time matrix for the basin MSM
-                            mfpt_basins = FNManager.calculate_mfpt_matrix(T_basins)
+                            mfpt_basins = trajFNManager.calculate_mfpt_matrix(T_basins)
                             printNumpyND("P", T_basins)
                             printNumpyND("MFPT", mfpt_basins)
 
                 # Average the basin transition matrix across repeats for this type/thermo
-                for typeIx in range(len(uniq_types1)):
-                    for thermoIx in range(len(uniq_thermos1)):
-                        print(f"Type {uniq_types1[typeIx]} Thermo {uniq_thermos1[thermoIx]}")
+                for typeIx in range(len(uniq_trajtypes)):
+                    for thermoIx in range(len(uniq_trajThermos)):
+                        print(f"Type {uniq_trajtypes[typeIx]} Thermo {uniq_trajThermos[thermoIx]}")
                         T_avg_byRep[typeIx, thermoIx, :, :] = np.mean(T_basin_storage[typeIx, :, thermoIx, :, :], axis=0)
 
                         #row_sums = T_avg_byRep[typeIx, thermoIx, :, :].sum(axis=1, keepdims=True)
@@ -2500,7 +2565,7 @@ def main(args):
                         printNumpyND("T_avg_byRep", T_avg_byRep[typeIx, thermoIx, :, :])
 
             # Plot 2D PMFs
-            for typeIx in range(len(uniq_types1)):
+            for typeIx in range(len(uniq_trajtypes)):
                 for repeatIx in [0]: # range(len(uniq_repeats1)):
                     for thermoIx in [0]: # range(len(uniq_thermos1)):
                         plt.figure(figsize=(8, 6))
@@ -2509,9 +2574,9 @@ def main(args):
                         plt.xlim(-180.0, 180.0)
                         plt.ylim(-180.0, 180.0)
                         
-                        plt.xlabel(obs_title1)
+                        plt.xlabel(obs_title2)
                         plt.ylabel(obs_title2)
-                        plt.title(f"2D PMF: {obs_title1} vs {obs_title2} | Type {uniq_types1[typeIx]} Repeat {uniq_repeats1[repeatIx]} Thermo {uniq_thermos1[thermoIx]}")
+                        plt.title(f"2D PMF: {obs_title2} vs {obs_title2} | Type {uniq_trajtypes[typeIx]} Repeat {uniq_trajRepeats[repeatIx]} Thermo {uniq_trajThermos[thermoIx]}")
 
             # Finish plots
             if not args.useAgg:
@@ -2572,7 +2637,7 @@ def main(args):
                 lag_max = min(max_lag, n_frames - 1)
                 return bat_stats.circularACFPerCoordinate(arr, max_lag=lag_max, batch_size=args.acfBatchSize)
 
-            for row in FNManager.entries:
+            for row in trajFNManager.entries:
                 s_type, seed, repeatIx, thermoIx, FN = row
 
                 if args.acfMaxTraj is not None and traj_counter >= args.acfMaxTraj:
@@ -2713,8 +2778,8 @@ def main(args):
     #region Restart: write restart files into self.dir/restDir/restDir.<seed>
     if (args.restDir):
         TRAJECTORY_REQUIRED = True
-        FNManager = REXFNManager(args.dir, args.inTrajFNRoots, args.cols)
-        FNManager.write_restarts_from_trajectories(args.restDir, args.topology, dry=args.dry)
+        trajFNManager = REXFNManager(args.dir, args.inTrajFNRoots, args.cols)
+        trajFNManager.write_restarts_from_trajectories(args.restDir, args.topology, dry=args.dry)
     #endregion
 
 #endregion --------------------------------------------------------------------
