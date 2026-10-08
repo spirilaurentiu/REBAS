@@ -405,20 +405,24 @@ FIGURES_DICT = {
         "2but": {
             "obs_funcs" : [Observables.distances],
             "obs_funcs_args" : [{"pairs": [[-1, -1]]}],
+            "obs_names" : [Observables.distances.__name__],
             "obs_titles" : ["2-butanol Bonds Lengths"]},
         "ala1": {
             "obs_funcs" : [Observables.dihedral_a1_a2_a3_a4],
             "obs_funcs_args" : [{"a1":4, "a2":6, "a3":8, "a4":14}],
+            "obs_names" : [Observables.dihedral_a1_a2_a3_a4.__name__],
             "obs_titles" : ["Dihedral Angle (4,6,8,14)"]
         },
         "trpch": {
             "obs_funcs" : [Observables.distances],
             "obs_funcs_args" : [{"pairs": [[-1, -1]]}],
+            "obs_names" : [Observables.distances.__name__],
             "obs_titles" : ["Trp-Cage Bonds Lengths"]
         },
         "adk": {
             "obs_funcs" : [Observables.distances],
             "obs_funcs_args" : [{"pairs": [[-1, -1]]}],
+            "obs_names" : [Observables.distances.__name__],
             "obs_titles" : ["ADK AMPbd-LID Distance"]
         }
     },
@@ -426,20 +430,24 @@ FIGURES_DICT = {
         "2but": {
             "obs_funcs" : [Observables.distances],
             "obs_funcs_args" : [{"pairs": [[-1, -1]]}],
+            "obs_names" : [Observables.distances.__name__],
             "obs_titles" : ["2-butanol Bonds Lengths"]},
         "ala1": {
             "obs_funcs" : [Observables.dihedral_a1_a2_a3_a4],
             "obs_funcs_args" : [{"a1":4, "a2":6, "a3":8, "a4":14}],
+            "obs_names" : [Observables.dihedral_a1_a2_a3_a4.__name__],
             "obs_titles" : ["Dihedral Angle (4,6,8,14)"]
         },
         "trpch": {
             "obs_funcs" : [Observables.distances],
             "obs_funcs_args" : [{"pairs": [[8, 298]]}],
+            "obs_names" : [Observables.distances.__name__],
             "obs_titles" : ["Trp-Cage Bonds Lengths"]
         },
         "adk": {
             "obs_funcs" : [Observables.distances],
             "obs_funcs_args" : [{"pairs": [[615, 2312]]}],
+            "obs_names" : [Observables.distances.__name__],
             "obs_titles" : ["ADK AMPbd-LID Distance"]
         }
     },
@@ -447,30 +455,32 @@ FIGURES_DICT = {
         "2but": {
             "obs_funcs" : [Observables.distances],
             "obs_funcs_args" : [{"pairs": [[-1, -1]]}],
+            "obs_names" : [Observables.distances.__name__],
             "obs_titles" : ["2-butanol Bonds Lengths"]},
         "ala1": {
             "obs_funcs" : [Observables.dihedral_a1_a2_a3_a4, Observables.dihedral_a1_a2_a3_a4],
             "obs_funcs_args" : [{"a1":4, "a2":6, "a3":8, "a4":14}, {"a1":6, "a2":8, "a3":14, "a4":16}],
+            "obs_names" : [Observables.dihedral_a1_a2_a3_a4.__name__, Observables.dihedral_a1_a2_a3_a4.__name__],
             "obs_titles" : ["2D PMF"]
         },
         "trpch": {
             "obs_funcs" : [Observables.distances, Observables.dihedral_phi_psi],
             "obs_funcs_args" : [{"pairs": [[8, 298]]}, {"phi_psi": "phi", "resid": 11}],
+            "obs_names" : [Observables.distances.__name__, Observables.dihedral_phi_psi.__name__],
             "obs_titles" : ["2D PMF"]
         },
         "adk": {
             "obs_funcs" : [Observables.distances],
             "obs_funcs_args" : [{"pairs": [[615, 2312]]}],
+            "obs_names" : [Observables.distances.__name__],
             "obs_titles" : ["ADK AMPbd-LID Distance"]
         }
     },    
 }
 
-#print(dict_dict["traj_stats_0D"]["2but"]["obs_titles"])
-#sys.exit(0)
 
 # Get trajectory data
-def load_trajectory_data(trajFNManager, args, burnin=0, burnout=None):
+def load_trajectory_data(trajFNManager, args, obs_index=0, burnin=0, burnout=None):
 
     if args.moleculeName not in args.dir:
         print(f"Error: moleculeName '{args.moleculeName}' not found in directory path '{args.dir}'.")
@@ -524,6 +534,7 @@ def load_trajectory_data(trajFNManager, args, burnin=0, burnout=None):
     obs_title = FIGURES_DICT.get(args.figures[0], {}).get(args.moleculeName, {}).get("obs_titles", [None])[0]
     obs_funcs = FIGURES_DICT.get(args.figures[0], {}).get(args.moleculeName, {}).get("obs_funcs", None)
     obs_funcs_args = FIGURES_DICT.get(args.figures[0], {}).get(args.moleculeName, {}).get("obs_funcs_args", None)
+    obs_names = FIGURES_DICT.get(args.figures[0], {}).get(args.moleculeName, {}).get("obs_names", None)
     #print(obs_title)
     #print(obs_funcs)
     #print(obs_funcs_args)
@@ -549,8 +560,12 @@ def load_trajectory_data(trajFNManager, args, burnin=0, burnout=None):
     # pick your frame slice once:
     frames = slice(burnin, burnout)   # or slice(GLOBAL_BURNIN, None)
 
-    obs_func = obs_funcs[0] if obs_funcs else None
-    obs_func_args = obs_funcs_args[0] if obs_funcs_args else {}
+    obs_func, obs_func_args, obs_name = None, {}, ""
+    if obs_index != -1:
+        obs_func = obs_funcs[obs_index] if obs_funcs else None
+        obs_func_args = obs_funcs_args[obs_index] if obs_funcs_args else {}
+        obs_name = obs_names[obs_index] if obs_names else None
+
     (trajObservables, uniq_trajtypes, uniq_trajRepeats, uniq_trajThermos) = trajFNManager.getTrajDataFromAllFiles(
         obs_func,
         filters=filters,
@@ -2236,7 +2251,7 @@ def main(args):
                     plt.legend()
                     plt.tight_layout()
                     if args.useAgg:
-                        plt.savefig(f"traj_{obs_name2}_acf.png")
+                        plt.savefig(f"traj_{obs_name}_acf.png")
                 # endregion Autocorrelation function (ACF) print and plot
 
                 # Finish plots
