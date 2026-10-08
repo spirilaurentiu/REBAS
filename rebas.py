@@ -399,15 +399,85 @@ def load_output_data(args, burnin):
         return out_df
 #
 
+# Set a dictionary for observables based on molecule name
+FIGURES_DICT = {
+    "traj_stats_0D": {
+        "2but": {
+            "obs_funcs" : [Observables.distances],
+            "obs_funcs_args" : [{"pairs": [[-1, -1]]}],
+            "obs_titles" : ["2-butanol Bonds Lengths"]},
+        "ala1": {
+            "obs_funcs" : [Observables.dihedral_a1_a2_a3_a4],
+            "obs_funcs_args" : [{"a1":4, "a2":6, "a3":8, "a4":14}],
+            "obs_titles" : ["Dihedral Angle (4,6,8,14)"]
+        },
+        "trpch": {
+            "obs_funcs" : [Observables.distances],
+            "obs_funcs_args" : [{"pairs": [[-1, -1]]}],
+            "obs_titles" : ["Trp-Cage Bonds Lengths"]
+        },
+        "adk": {
+            "obs_funcs" : [Observables.distances],
+            "obs_funcs_args" : [{"pairs": [[-1, -1]]}],
+            "obs_titles" : ["ADK AMPbd-LID Distance"]
+        }
+    },
+    "traj_stats_1D": {
+        "2but": {
+            "obs_funcs" : [Observables.distances],
+            "obs_funcs_args" : [{"pairs": [[-1, -1]]}],
+            "obs_titles" : ["2-butanol Bonds Lengths"]},
+        "ala1": {
+            "obs_funcs" : [Observables.dihedral_a1_a2_a3_a4],
+            "obs_funcs_args" : [{"a1":4, "a2":6, "a3":8, "a4":14}],
+            "obs_titles" : ["Dihedral Angle (4,6,8,14)"]
+        },
+        "trpch": {
+            "obs_funcs" : [Observables.distances],
+            "obs_funcs_args" : [{"pairs": [[8, 298]]}],
+            "obs_titles" : ["Trp-Cage Bonds Lengths"]
+        },
+        "adk": {
+            "obs_funcs" : [Observables.distances],
+            "obs_funcs_args" : [{"pairs": [[615, 2312]]}],
+            "obs_titles" : ["ADK AMPbd-LID Distance"]
+        }
+    },
+    "traj_stats_2D": {
+        "2but": {
+            "obs_funcs" : [Observables.distances],
+            "obs_funcs_args" : [{"pairs": [[-1, -1]]}],
+            "obs_titles" : ["2-butanol Bonds Lengths"]},
+        "ala1": {
+            "obs_funcs" : [Observables.dihedral_a1_a2_a3_a4, Observables.dihedral_a1_a2_a3_a4],
+            "obs_funcs_args" : [{"a1":4, "a2":6, "a3":8, "a4":14}, {"a1":6, "a2":8, "a3":14, "a4":16}],
+            "obs_titles" : ["2D PMF"]
+        },
+        "trpch": {
+            "obs_funcs" : [Observables.distances, Observables.dihedral_phi_psi],
+            "obs_funcs_args" : [{"pairs": [[8, 298]]}, {"phi_psi": "phi", "resid": 11}],
+            "obs_titles" : ["2D PMF"]
+        },
+        "adk": {
+            "obs_funcs" : [Observables.distances],
+            "obs_funcs_args" : [{"pairs": [[615, 2312]]}],
+            "obs_titles" : ["ADK AMPbd-LID Distance"]
+        }
+    },    
+}
+
+#print(dict_dict["traj_stats_0D"]["2but"]["obs_titles"])
+#sys.exit(0)
+
 # Get trajectory data
-def load_trajectory_data(trajFNManager, args, obs_func=None, obs_func_args=None, burnin=0, burnout=None):
+def load_trajectory_data(trajFNManager, args, burnin=0, burnout=None):
 
     if args.moleculeName not in args.dir:
         print(f"Error: moleculeName '{args.moleculeName}' not found in directory path '{args.dir}'.")
-        exit(1)
+        sys.exit(1)
 
-    obs_name, obs_title = None, {}, "", ""
-    obs_name2, obs_title2 = None, {}, "", ""
+    obs_name, obs_title = "", ""
+    obs_name2, obs_title2 = "", ""
 
     if args.moleculeName == "2but":
         obs_func = Observables.distances
@@ -416,7 +486,6 @@ def load_trajectory_data(trajFNManager, args, obs_func=None, obs_func_args=None,
         obs_title = "2-butanol Bonds Lengths"
         firstTemperature = 300.0
         firstDeltaT = 600.0
-
     elif args.moleculeName == "ala1":
         obs_func = Observables.dihedral_a1_a2_a3_a4
         obs_func_args = {"a1":4, "a2":6, "a3":8, "a4":14}
@@ -428,10 +497,9 @@ def load_trajectory_data(trajFNManager, args, obs_func=None, obs_func_args=None,
         obs_title2 = "2D PMF"            
         firstTemperature = 300.0
         firstDeltaT = 50.0
-
     elif args.moleculeName == "trpch":
         obs_func = Observables.distances
-        if "traj_stats_0D" in args.figure:
+        if "traj_stats_0D" in args.figures:
             obs_func_args = {"pairs": [[-1, -1]]}
         else:
             obs_func_args = {"pairs": [[8, 298]]}
@@ -443,7 +511,6 @@ def load_trajectory_data(trajFNManager, args, obs_func=None, obs_func_args=None,
         obs_title2 = "2D PMF"            
         firstTemperature = 300.0
         firstDeltaT = 30
-
     elif args.moleculeName == "adk":
         obs_func = Observables.distances
         obs_func_args = {"pairs": [[615, 2312]]}
@@ -451,6 +518,16 @@ def load_trajectory_data(trajFNManager, args, obs_func=None, obs_func_args=None,
         obs_title = "ADK AMPbd-LID Distance"
         firstTemperature = 300.0
         firstDeltaT = 8                    
+
+    #print(args.figures[0])
+    #print(args.moleculeName)
+    obs_title = FIGURES_DICT.get(args.figures[0], {}).get(args.moleculeName, {}).get("obs_titles", [None])[0]
+    obs_funcs = FIGURES_DICT.get(args.figures[0], {}).get(args.moleculeName, {}).get("obs_funcs", None)
+    obs_funcs_args = FIGURES_DICT.get(args.figures[0], {}).get(args.moleculeName, {}).get("obs_funcs_args", None)
+    #print(obs_title)
+    #print(obs_funcs)
+    #print(obs_funcs_args)
+    #sys.exit(0)
 
     #region Get filters if specified
     # Get filters if specified
@@ -472,6 +549,8 @@ def load_trajectory_data(trajFNManager, args, obs_func=None, obs_func_args=None,
     # pick your frame slice once:
     frames = slice(burnin, burnout)   # or slice(GLOBAL_BURNIN, None)
 
+    obs_func = obs_funcs[0] if obs_funcs else None
+    obs_func_args = obs_funcs_args[0] if obs_funcs_args else {}
     (trajObservables, uniq_trajtypes, uniq_trajRepeats, uniq_trajThermos) = trajFNManager.getTrajDataFromAllFiles(
         obs_func,
         filters=filters,
@@ -1717,8 +1796,8 @@ def main(args):
                 # elif args.moleculeName == "trpch":
                 #     obs_func = Observables.distances
                 #     obs_func_args = {"pairs": [[-1, -1]]}
-                #     obs_name2 = Observables.distances.__name__
-                #     obs_title2 = "Trp-Cage Bonds Lengths"
+                #     obs_name = Observables.distances.__name__
+                #     obs_title = "Trp-Cage Bonds Lengths"
                 #     firstTemperature = 300.0
                 #     firstDeltaT = 30
                 # (trajObservables, uniq_trajtypes, uniq_trajRepeats, uniq_trajThermos) = trajFNManager.getTrajDataFromAllFiles(
