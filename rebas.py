@@ -200,6 +200,7 @@ def plot1D(Y,
            X=None,
            Yerr=None,
            Yerr_every=1,
+           stride=1,
            scatter=False,
            instantiateFigure=True,
            title="title",
@@ -251,18 +252,18 @@ def plot1D(Y,
     for ix, Y_series in enumerate(Y):
         if Yerr is None:
             if scatter:
-                plt.scatter(X[ix], Y_series, label=labels[ix],
+                plt.scatter(X[ix][::stride], Y_series[::stride], label=labels[ix],
                             color=colors[ix] if colors else None,
                             marker=marker)
             else:
-                plt.plot(X[ix], Y_series, label=labels[ix],
+                plt.plot(X[ix][::stride], Y_series[::stride], label=labels[ix],
                          color=colors[ix] if colors else None)
         elif scatter:
-            plt.errorbar(X[ix], Y_series, yerr=Yerr[ix], errorevery=Yerr_every,
+            plt.errorbar(X[ix][::stride], Y_series[::stride], yerr=Yerr[ix][::stride], errorevery=Yerr_every,
                          fmt=marker, linestyle="None", alpha=alpha,
                          label=labels[ix], color=colors[ix] if colors else None)
         else:
-            plt.errorbar(X[ix], Y_series, yerr=Yerr[ix], errorevery=Yerr_every,
+            plt.errorbar(X[ix][::stride], Y_series[::stride], yerr=Yerr[ix][::stride], errorevery=Yerr_every,
                          label=labels[ix], linestyle=linestyle, marker=marker, alpha=alpha,
                          color=colors[ix] if colors else None)
     
@@ -402,78 +403,171 @@ def load_output_data(args, burnin):
 # Set a dictionary for observables based on molecule name
 FIGURES_DICT = {
     "traj_stats_0D": {
+        "ethane": {
+            "obs_funcs" : [Observables.dihedral_a1_a2_a3_a4],
+            "obs_funcs_args" : [{"a1":2, "a2":0, "a3":1, "a4":7}],
+            "obs_names" : [Observables.dihedral_a1_a2_a3_a4.__name__],
+            "obs_titles" : ["Dihedral Angle (2,0,1,7)"],
+            "firstTemperature" : 300.0,
+            "firstDeltaT" : 300.0
+        },
         "2but": {
             "obs_funcs" : [Observables.distances],
             "obs_funcs_args" : [{"pairs": [[-1, -1]]}],
             "obs_names" : [Observables.distances.__name__],
-            "obs_titles" : ["2-butanol Bonds Lengths"]},
+            "obs_titles" : ["2-butanol Bonds Lengths"],
+            "firstTemperature" : 300.0,
+            "firstDeltaT" : 300.0
+        },
         "ala1": {
             "obs_funcs" : [Observables.dihedral_a1_a2_a3_a4],
             "obs_funcs_args" : [{"a1":4, "a2":6, "a3":8, "a4":14}],
             "obs_names" : [Observables.dihedral_a1_a2_a3_a4.__name__],
-            "obs_titles" : ["Dihedral Angle (4,6,8,14)"]
+            "obs_titles" : ["Dihedral Angle (4,6,8,14)"],
+            "firstTemperature" : 300.0,
+            "firstDeltaT" : 50.0
         },
         "trpch": {
             "obs_funcs" : [Observables.distances],
             "obs_funcs_args" : [{"pairs": [[-1, -1]]}],
             "obs_names" : [Observables.distances.__name__],
-            "obs_titles" : ["Trp-Cage Bonds Lengths"]
+            "obs_titles" : ["Trp-Cage Bonds Lengths"],
+            "firstTemperature" : 300.0,
+            "firstDeltaT" : 30.0
         },
         "adk": {
             "obs_funcs" : [Observables.distances],
             "obs_funcs_args" : [{"pairs": [[-1, -1]]}],
             "obs_names" : [Observables.distances.__name__],
-            "obs_titles" : ["ADK AMPbd-LID Distance"]
+            "obs_titles" : ["ADK AMPbd-LID Distance"],
+            "firstTemperature" : 300.0,
+            "firstDeltaT" : 8.0
         }
     },
     "traj_stats_1D": {
+        "ethane": {
+            "obs_funcs" : [Observables.dihedral_a1_a2_a3_a4],
+            "obs_funcs_args" : [{"a1":2, "a2":0, "a3":1, "a4":7}],
+            "obs_names" : [Observables.dihedral_a1_a2_a3_a4.__name__],
+            "obs_titles" : ["Dihedral Angle (2,0,1,7)"],
+            "firstTemperature" : 300.0,
+            "firstDeltaT" : 300.0
+        },
         "2but": {
             "obs_funcs" : [Observables.distances],
             "obs_funcs_args" : [{"pairs": [[-1, -1]]}],
             "obs_names" : [Observables.distances.__name__],
-            "obs_titles" : ["2-butanol Bonds Lengths"]},
+            "obs_titles" : ["2-butanol Bonds Lengths"],
+            "firstTemperature" : 300.0,
+            "firstDeltaT" : 300.0
+        },
         "ala1": {
-            "obs_funcs" : [Observables.dihedral_a1_a2_a3_a4],
-            "obs_funcs_args" : [{"a1":4, "a2":6, "a3":8, "a4":14}],
-            "obs_names" : [Observables.dihedral_a1_a2_a3_a4.__name__],
-            "obs_titles" : ["Dihedral Angle (4,6,8,14)"]
+            "obs_funcs" : [Observables.ala_PMF_indicator], #"obs_funcs" : [Observables.dihedral_a1_a2_a3_a4],
+            "obs_funcs_args" : [{"a1":4, "a2":6, "a3":8, "a4":14, "a5":16}], #"obs_funcs_args" : [{"a1":4, "a2":6, "a3":8, "a4":14}],
+            "obs_names" : [Observables.ala_PMF_indicator.__name__],
+            "obs_titles" : ["PMF Indicator"], #"obs_titles" : ["Dihedral Angle (4,6,8,14)"],
+            "firstTemperature" : 300.0,
+            "firstDeltaT" : 50.0
         },
         "trpch": {
             "obs_funcs" : [Observables.distances],
             "obs_funcs_args" : [{"pairs": [[8, 298]]}],
             "obs_names" : [Observables.distances.__name__],
-            "obs_titles" : ["Trp-Cage Bonds Lengths"]
+            "obs_titles" : ["Trp-Cage Bonds Lengths"],
+            "firstTemperature" : 300.0,
+            "firstDeltaT" : 30.0
         },
         "adk": {
             "obs_funcs" : [Observables.distances],
             "obs_funcs_args" : [{"pairs": [[615, 2312]]}],
             "obs_names" : [Observables.distances.__name__],
-            "obs_titles" : ["ADK AMPbd-LID Distance"]
+            "obs_titles" : ["ADK AMPbd-LID Distance"],
+            "firstTemperature" : 300.0,
+            "firstDeltaT" : 8.0
         }
     },
-    "traj_stats_2D": {
+    "recover_replica": {
+        "ethane": {
+            "obs_funcs" : [Observables.dihedral_a1_a2_a3_a4],
+            "obs_funcs_args" : [{"a1":2, "a2":0, "a3":1, "a4":7}],
+            "obs_names" : [Observables.dihedral_a1_a2_a3_a4.__name__],
+            "obs_titles" : ["Dihedral Angle (2,0,1,7)"],
+            "firstTemperature" : 300.0,
+            "firstDeltaT" : 300.0
+        },
         "2but": {
             "obs_funcs" : [Observables.distances],
             "obs_funcs_args" : [{"pairs": [[-1, -1]]}],
             "obs_names" : [Observables.distances.__name__],
-            "obs_titles" : ["2-butanol Bonds Lengths"]},
+            "obs_titles" : ["2-butanol Bonds Lengths"],
+            "firstTemperature" : 300.0,
+            "firstDeltaT" : 300.0
+        },
+        "ala1": {
+            "obs_funcs" : [Observables.ala_PMF_indicator], #"obs_funcs" : [Observables.dihedral_a1_a2_a3_a4],
+            "obs_funcs_args" : [{"a1":4, "a2":6, "a3":8, "a4":14, "a5":16}], #"obs_funcs_args" : [{"a1":4, "a2":6, "a3":8, "a4":14}],
+            "obs_names" : [Observables.ala_PMF_indicator.__name__],
+            "obs_titles" : ["PMF Indicator"], #"obs_titles" : ["Dihedral Angle (4,6,8,14)"],
+            "firstTemperature" : 300.0,
+            "firstDeltaT" : 50.0
+        },
+        "trpch": {
+            "obs_funcs" : [Observables.distances],
+            "obs_funcs_args" : [{"pairs": [[8, 298]]}],
+            "obs_names" : [Observables.distances.__name__],
+            "obs_titles" : ["Trp-Cage Bonds Lengths"],
+            "firstTemperature" : 300.0,
+            "firstDeltaT" : 30.0
+        },
+        "adk": {
+            "obs_funcs" : [Observables.distances],
+            "obs_funcs_args" : [{"pairs": [[615, 2312]]}],
+            "obs_names" : [Observables.distances.__name__],
+            "obs_titles" : ["ADK AMPbd-LID Distance"],
+            "firstTemperature" : 300.0,
+            "firstDeltaT" : 8.0
+        }
+    },    
+    "traj_stats_2D": {
+        "ethane": {
+            "obs_funcs" : [Observables.dihedral_a1_a2_a3_a4],
+            "obs_funcs_args" : [{"a1":2, "a2":0, "a3":1, "a4":7}],
+            "obs_names" : [Observables.dihedral_a1_a2_a3_a4.__name__],
+            "obs_titles" : ["Dihedral Angle (2,0,1,7)"],
+            "firstTemperature" : 300.0,
+            "firstDeltaT" : 300.0
+        },
+        "2but": {
+            "obs_funcs" : [Observables.distances],
+            "obs_funcs_args" : [{"pairs": [[-1, -1]]}],
+            "obs_names" : [Observables.distances.__name__],
+            "obs_titles" : ["2-butanol Bonds Lengths"],
+            "firstTemperature" : 300.0,
+            "firstDeltaT" : 300.0
+        },
         "ala1": {
             "obs_funcs" : [Observables.dihedral_a1_a2_a3_a4, Observables.dihedral_a1_a2_a3_a4],
             "obs_funcs_args" : [{"a1":4, "a2":6, "a3":8, "a4":14}, {"a1":6, "a2":8, "a3":14, "a4":16}],
             "obs_names" : [Observables.dihedral_a1_a2_a3_a4.__name__, Observables.dihedral_a1_a2_a3_a4.__name__],
-            "obs_titles" : ["2D PMF"]
+            "obs_titles" : ["2D PMF"],
+            "firstTemperature" : 300.0,
+            "firstDeltaT" : 50.0
         },
         "trpch": {
             "obs_funcs" : [Observables.distances, Observables.dihedral_phi_psi],
             "obs_funcs_args" : [{"pairs": [[8, 298]]}, {"phi_psi": "phi", "resid": 11}],
             "obs_names" : [Observables.distances.__name__, Observables.dihedral_phi_psi.__name__],
-            "obs_titles" : ["2D PMF"]
+            "obs_titles" : ["2D PMF"],
+            "firstTemperature" : 300.0,
+            "firstDeltaT" : 30.0
         },
         "adk": {
             "obs_funcs" : [Observables.distances],
             "obs_funcs_args" : [{"pairs": [[615, 2312]]}],
             "obs_names" : [Observables.distances.__name__],
-            "obs_titles" : ["ADK AMPbd-LID Distance"]
+            "obs_titles" : ["ADK AMPbd-LID Distance"],
+            "firstTemperature" : 300.0,
+            "firstDeltaT" : 8.0
         }
     },    
 }
@@ -495,7 +589,7 @@ def load_trajectory_data(trajFNManager, args, obs_index=0, burnin=0, burnout=Non
         obs_name = Observables.distances.__name__
         obs_title = "2-butanol Bonds Lengths"
         firstTemperature = 300.0
-        firstDeltaT = 600.0
+        firstDeltaT = 300.0
     elif args.moleculeName == "ala1":
         obs_func = Observables.dihedral_a1_a2_a3_a4
         obs_func_args = {"a1":4, "a2":6, "a3":8, "a4":14}
@@ -535,6 +629,8 @@ def load_trajectory_data(trajFNManager, args, obs_index=0, burnin=0, burnout=Non
     obs_funcs = FIGURES_DICT.get(args.figures[0], {}).get(args.moleculeName, {}).get("obs_funcs", None)
     obs_funcs_args = FIGURES_DICT.get(args.figures[0], {}).get(args.moleculeName, {}).get("obs_funcs_args", None)
     obs_names = FIGURES_DICT.get(args.figures[0], {}).get(args.moleculeName, {}).get("obs_names", None)
+    firstTemperature = FIGURES_DICT.get(args.figures[0], {}).get(args.moleculeName, {}).get("firstTemperature", 300.0)
+    firstDeltaT = FIGURES_DICT.get(args.figures[0], {}).get(args.moleculeName, {}).get("firstDeltaT", 50.0)
     #print(obs_title)
     #print(obs_funcs)
     #print(obs_funcs_args)
@@ -617,6 +713,9 @@ def main(args):
     out_df, traj_df = None, None # pandas
 
     stats = LS_Statistics()
+
+    GLOBAL_TRAJ_BURNIN = args.trajBurnin
+    GLOBAL_TRAJ_END = None
 
     #region DRILL
     if DRILL_REQUIRED: # Files generated by VMD measure
@@ -737,27 +836,25 @@ def main(args):
 
     if OUTPUT_REQUIRED and TRAJECTORY_REQUIRED:
 
-        GLOBAL_OUTPUT_BURNIN = 0
-
         # -----------------------------------------------------------------------------
         # Read trajectory data from all files
         # -----------------------------------------------------------------------------
         #region Get filters if specified
         # Get filters if specified
-        filters = {}
-        if args.filterTrajBy:
-            filters = parse_filters(args.filterTrajBy)
-            for col, val in filters.items():
-                print(f"filter: {col} = {val}")
+        # filters = {}
+        # if args.filterTrajBy:
+        #     filters = parse_filters(args.filterTrajBy)
+        #     for col, val in filters.items():
+        #         print(f"filter: {col} = {val}")
         #endregion
 
         trajFNManager = REXFNManager(args.dir, args.inTrajFNRoots, args.cols, topology=args.topology)
-        trajFNManager.prepareTrajArraySize(filters=filters)
+        #trajFNManager.prepareTrajArraySize(filters=filters)
 
         if "recover_replica" in args.figures:
 
                 # Read output from all files
-                out_df = load_output_data(args, burnin = GLOBAL_OUTPUT_BURNIN)
+                out_df = load_output_data(args, burnin = GLOBAL_TRAJ_BURNIN)
                 out_df.info()
                 #print("outf_df info:\n", out_df.info())
 
@@ -778,8 +875,8 @@ def main(args):
                 # exit(2)
                 #endregion Panda_Study
 
-                #region Read observables
-                trajObservables = []
+                #region Read thermo2replica mapping
+                replica_thermo = []
                 out_observables_meta = []
                 out_max_nof_replicas = 0
                 ix = -1
@@ -797,7 +894,7 @@ def main(args):
                     print("============= repIxs theIxs concatData")
                     print(repIxs.shape, theIxs.shape, concatData.shape)
 
-                    trajObservables.append(concatData)
+                    replica_thermo.append(concatData)
                     out_observables_meta.append({
                         "sim_type": sim_type,
                         "seed": seed,})
@@ -810,10 +907,10 @@ def main(args):
                 # # Print a summary
                 if False:
                     SOME_PRINT_BURNIN = 0
-                    print("Observables:")
+                    print("Replica-Thermo Mapping:")
                     #print(out_observables[0][:, SOME_PRINT_BURNIN:])
                     #print(out_observables[0].T[SOME_PRINT_BURNIN:])
-                    for obsIx, obs in enumerate(trajObservables):
+                    for obsIx, obs in enumerate(replica_thermo):
                         if obsIx > 1:
                             break
                         for obsEntryIx, obsEntry in enumerate(obs.T[SOME_PRINT_BURNIN:]):
@@ -835,48 +932,14 @@ def main(args):
                 #         print(f"filter: {col} = {val}")
                 #endregion
 
-                GLOBAL_TRAJ_BURNIN = args.trajBurnin
-                GLOBAL_TRAJ_END = None
-
                 # pick your frame slice once:
-                frames = slice(GLOBAL_TRAJ_BURNIN, GLOBAL_TRAJ_END)   # or slice(GLOBAL_BURNIN, None)
+                #frames = slice(GLOBAL_TRAJ_BURNIN, GLOBAL_TRAJ_END)   # or slice(GLOBAL_BURNIN, None)
 
                 # trajFNManager = REXFNManager(args.dir, args.inTrajFNRoots, args.cols, topology=args.topology)
                 # trajFNManager.prepareTrajArraySize(filters=filters)
 
-                obs_func, obs_func_args, obs_name2, obs_title2 = None, {}, "", ""
-
-                if args.moleculeName == "2but":
-                    obs_func = Observables.distances
-                    obs_func_args = {"pairs": [[-1, -1]]}
-                    obs_name2 = Observables.distances.__name__
-                    obs_title2 = "2-butanol Bonds Lengths"
-                    firstTemperature = 300.0
-                    firstDeltaT = 600.0
-                                     
-                elif args.moleculeName == "ala1":
-                    obs_func = Observables.dihedral_a1_a2_a3_a4
-                    obs_func_args = {"a1":4, "a2":6, "a3":8, "a4":14}
-                    obs_name2 = Observables.dihedral_a1_a2_a3_a4.__name__
-                    obs_title2 = "Dihedral Angle (4,6,8,14)"
-                    firstTemperature = 300.0
-                    firstDeltaT = 50.0
-
-                elif args.moleculeName == "trpch":
-                    obs_func = Observables.distances
-                    obs_func_args = {"pairs": [[8, 298]]}
-                    obs_name2 = Observables.distances.__name__
-                    obs_title2 = "Trp-Cage Bonds Lengths"
-                    firstTemperature = 300.0
-                    firstDeltaT = 30
-            
-                (trajObservables, uniq_trajtypes, uniq_trajRepeats, uniq_trajThermos) = trajFNManager.getTrajDataFromAllFiles(
-                    obs_func,
-                    filters=filters,
-                    frames=frames,
-                    **obs_func_args,
-                    verbose=False
-                )
+                [(trajObservables, uniq_trajtypes, uniq_trajRepeats, uniq_trajThermos),
+                    (trajObs_name, trajObs_title, Ts)] = load_trajectory_data(trajFNManager, args, obs_index=0, burnin=GLOBAL_TRAJ_BURNIN, burnout=GLOBAL_TRAJ_END)
 
                 print("trajObservables.shape", trajObservables.shape)
                 n_trajTypes, n_trajRepeats, n_trajThermos, n_trajObservables, n_trajFrames = trajObservables.shape
@@ -886,11 +949,11 @@ def main(args):
                 #print("uniq_trajThermos", uniq_trajThermos)
 
                 # Geometric progression along 14 replicas
-                temperatureRatio = (firstTemperature + firstDeltaT) / firstTemperature
-                Ts = [
-                    firstTemperature * temperatureRatio**thermoIx
-                    for thermoIx in range(n_trajThermos)
-                ]
+                # temperatureRatio = (firstTemperature + firstDeltaT) / firstTemperature
+                # Ts = [
+                #     firstTemperature * temperatureRatio**thermoIx
+                #     for thermoIx in range(n_trajThermos)
+                # ]
 
                 #print("FNManager entries:", FNManager.entries)
                 #print("trajFNManager entries:", trajFNManager.entries)
@@ -900,12 +963,12 @@ def main(args):
                 print("That alignment depends on how often output rows and DCD frames are recorded.")
                 min_output_frames = min(
                     np.count_nonzero(obs[0] == replica_ix)
-                    for obs in trajObservables
+                    for obs in replica_thermo
                     for replica_ix in np.unique(obs[0])
                 )
                 max_output_frames = max(
                     np.count_nonzero(obs[0] == replica_ix)
-                    for obs in trajObservables
+                    for obs in replica_thermo
                     for replica_ix in np.unique(obs[0])
                 )
                 print("min max_output_frames", min_output_frames, max_output_frames)
@@ -922,10 +985,11 @@ def main(args):
                     print("OUTPUT_ENTRY sim_type,  seed, repeat:", out_type, out_seed, out_repeat)
 
                     #region PRINT
-                    SOME_PRINT_BURNIN = 0
-                    print("OUTPUT Observables replica to thermo:")
-                    print(trajObservables[out_Ix][:, SOME_PRINT_BURNIN:])
-                    print(trajObservables[out_Ix].T[SOME_PRINT_BURNIN:])
+                    if False:
+                        SOME_PRINT_BURNIN = 0
+                        print("OUTPUT Observables replica to thermo:")
+                        print(replica_thermo[out_Ix][:, SOME_PRINT_BURNIN:])
+                        print(replica_thermo[out_Ix].T[SOME_PRINT_BURNIN:])
                     #endregion
 
                     # Find the corresponding trajectory type and repeat in the trajectory data
@@ -960,7 +1024,8 @@ def main(args):
 
 
                             #selected_thermoIxs = out_observables[out_Ix][1][ out_observables[out_Ix][0] == justThisReplIx ][frameRange]
-                            selected_thermoIxs = trajObservables[out_Ix][1][ trajObservables[out_Ix][0] == justThisReplIx ]
+                            # trajType, trajRepeat, trajThermo, trajObservable, trajFrame
+                            selected_thermoIxs = replica_thermo[out_Ix][1][ replica_thermo[out_Ix][0] == justThisReplIx ]
                             
                             #frameRange = range(0, 10)
                             #frameRange = range(0, max_output_frames)                            
@@ -1655,7 +1720,6 @@ def main(args):
 
         #endregion
 
-
         #region Paper figures: Efficiency
         if "tau_ac" in args.figures:
 
@@ -1707,18 +1771,15 @@ def main(args):
         # if args.moleculeName not in args.dir:
         #     print(f"Error: moleculeName '{args.moleculeName}' not found in directory path '{args.dir}'.")
         #     exit(1)
-
         # obs_func, obs_func_args, obs_name, obs_title = None, {}, "", ""
         # obs_func, obs_func_args, obs_name2, obs_title2 = None, {}, "", ""
-
-        # if args.moleculeName == "2but":
+        #region if args.moleculeName == "2but":
         #     obs_func = Observables.distances
         #     obs_func_args = {"pairs": [[-1, -1]]}
         #     obs_name = Observables.distances.__name__
         #     obs_title = "2-butanol Bonds Lengths"
         #     firstTemperature = 300.0
         #     firstDeltaT = 600.0
-
         # elif args.moleculeName == "ala1":
         #     obs_func = Observables.dihedral_a1_a2_a3_a4
         #     obs_func_args = {"a1":4, "a2":6, "a3":8, "a4":14}
@@ -1730,7 +1791,6 @@ def main(args):
         #     obs_title2 = "2D PMF"            
         #     firstTemperature = 300.0
         #     firstDeltaT = 50.0
-
         # elif args.moleculeName == "trpch":
         #     obs_func = Observables.distances
         #     obs_func_args = {"pairs": [[8, 298]]}
@@ -1742,7 +1802,6 @@ def main(args):
         #     obs_title2 = "2D PMF"            
         #     firstTemperature = 300.0
         #     firstDeltaT = 30
-
         # elif args.moleculeName == "adk":
         #     obs_func = Observables.distances
         #     obs_func_args = {"pairs": [[615, 2312]]}
@@ -1750,27 +1809,21 @@ def main(args):
         #     obs_title = "ADK AMPbd-LID Distance"
         #     firstTemperature = 300.0
         #     firstDeltaT = 8                    
-
-        # #region Get filters if specified
+        #endregion
+        #region Get filters if specified
         # # Get filters if specified
         # filters = {}
         # if args.filterTrajBy:
         #     filters = parse_filters(args.filterTrajBy)
         #     for col, val in filters.items():
         #         print(f"filter: {col} = {val}")
-        # #endregion
+        #endregion
 
         trajFNManager = REXFNManager(args.dir, args.inTrajFNRoots, args.cols, topology=args.topology)
         # trajFNManager.prepareTrajArraySize(filters=filters)
-
         # trajObservables, uniq_trajtypes, uniq_trajRepeats, uniq_trajThermos = None, None, None, None
-
-        GLOBAL_TRAJ_BURNIN = args.trajBurnin
-        GLOBAL_TRAJ_END = None
-
         # # pick your frame slice once:
         # frames = slice(GLOBAL_TRAJ_BURNIN, GLOBAL_TRAJ_END)   # or slice(GLOBAL_BURNIN, None)
-
         # (trajObservables, uniq_trajtypes, uniq_trajRepeats, uniq_trajThermos) = trajFNManager.getTrajDataFromAllFiles(
         #     obs_func,
         #     filters=filters,
@@ -1782,7 +1835,7 @@ def main(args):
         # )
         
         [(trajObservables, uniq_trajtypes, uniq_trajRepeats, uniq_trajThermos),
-            (obs_name, obs_title, Ts)] = load_trajectory_data(trajFNManager, args, burnin=GLOBAL_TRAJ_BURNIN, burnout=GLOBAL_TRAJ_END)
+            (obs_name, obs_title, Ts)] = load_trajectory_data(trajFNManager, args, obs_index=0, burnin=GLOBAL_TRAJ_BURNIN, burnout=GLOBAL_TRAJ_END)
 
         # Preliminary statistics
         if "traj_stats_0D" in args.figures:
@@ -2032,7 +2085,7 @@ def main(args):
                 for simIx in range(n_trajRepeats):
 
                     # Observables timeseries plots
-                    PRINT__, PLOT__ = True, False
+                    PRINT__, PLOT__ = True, True
                     if PRINT__:
                         print("Unique sim types:", uniq_trajtypes)
                         print("Unique repeats:", uniq_trajRepeats)
@@ -2040,16 +2093,17 @@ def main(args):
                     if PLOT__:
                         plotFN = None
                         if args.useAgg:
-                            plotFN = f"traj_{obs_name2}.png"
+                            plotFN = f"traj_{obs_name}.png"
 
                         Y_series = trajObservables[:, simIx, replicaIx, obsIx,:]
-                        print(Y_series.shape)
+                        print("Y_series.shape", Y_series.shape)
                         
                         plot1D(
                             Y = Y_series,
-                            title=obs_title2,
+                            stride=100,
+                            title=obs_title,
                             xlabel="Frame",
-                            ylabel=obs_name2,
+                            ylabel=obs_name,
                             labels=[f"Repeat {simIx} Type {uniq_trajtypes[ix]} Thermo {replicaIx}" for ix in range(len(trajObservables))],
                             colors=[colorByType(uniq_trajtypes[ix]) for ix in range(len(trajObservables))],
                             save_path=plotFN
@@ -2473,58 +2527,65 @@ def main(args):
             obs_func, obs_func_args, obs_name, obs_title = None, {}, "", ""
             obs_func2, obs_func_args2, obs_name2, obs_title2 = None, {}, "", ""
 
-            if args.moleculeName == "trpch":
-                obs_func = Observables.distances
-                obs_func_args = {"pairs": [[8, 298]]}
-                obs_func2 = Observables.dihedral_phi_psi
-                obs_func_args2 = {"phi_psi": "phi", "resid": 11}
-                obs_name2 = Observables.distances.__name__ + "_" + Observables.dihedral_phi_psi.__name__
-                obs_title2 = "2D"
+            # if args.moleculeName == "trpch":
+            #     obs_func = Observables.distances
+            #     obs_func_args = {"pairs": [[8, 298]]}
+            #     obs_func2 = Observables.dihedral_phi_psi
+            #     obs_func_args2 = {"phi_psi": "phi", "resid": 11}
+            #     obs_name2 = Observables.distances.__name__ + "_" + Observables.dihedral_phi_psi.__name__
+            #     obs_title2 = "2D"
+            # elif args.moleculeName == "ala1":
+            #     obs_func = Observables.dihedral_a1_a2_a3_a4
+            #     obs_func_args = {"a1":4, "a2":6, "a3":8, "a4":14}
+            #     obs_func2 = Observables.dihedral_a1_a2_a3_a4
+            #     obs_func_args2 = {"a1":6, "a2":8, "a3":14, "a4":16}
+            #     obs_name2 = Observables.dihedral_a1_a2_a3_a4.__name__ + "_" + Observables.dihedral_a1_a2_a3_a4.__name__
+            #     obs_title2 = "2D"
 
-            elif args.moleculeName == "ala1":
-                obs_func = Observables.dihedral_a1_a2_a3_a4
-                obs_func_args = {"a1":4, "a2":6, "a3":8, "a4":14}
-                obs_func2 = Observables.dihedral_a1_a2_a3_a4
-                obs_func_args2 = {"a1":6, "a2":8, "a3":14, "a4":16}
-                obs_name2 = Observables.dihedral_a1_a2_a3_a4.__name__ + "_" + Observables.dihedral_a1_a2_a3_a4.__name__
-                obs_title2 = "2D"
+            # (trajObservables, uniq_trajtypes, uniq_trajRepeats, uniq_trajThermos) = trajFNManager.getTrajDataFromAllFiles(
+            #     obs_func,
+            #     filters=filters,
+            #     frames=frames,
+            #     **obs_func_args,
+            #     verbose=False
+            # )
+            # (observables2, uniq_types2, uniq_repeats2, uniq_thermos2) = trajFNManager.getTrajDataFromAllFiles(
+            #     obs_func2,
+            #     filters=filters,
+            #     frames=frames,
+            #     **obs_func_args2,
+            #     verbose=False
+            # )
 
-            (trajObservables, uniq_trajtypes, uniq_trajRepeats, uniq_trajThermos) = trajFNManager.getTrajDataFromAllFiles(
-                obs_func,
-                filters=filters,
-                frames=frames,
-                **obs_func_args,
-                verbose=False
-            )
-
-            (observables2, uniq_types2, uniq_repeats2, uniq_thermos2) = trajFNManager.getTrajDataFromAllFiles(
-                obs_func2,
-                filters=filters,
-                frames=frames,
-                **obs_func_args2,
-                verbose=False
-            )
+            [(trajObservables, uniq_trajtypes, uniq_trajRepeats, uniq_trajThermos),
+                (obs_name, obs_title, Ts)] = load_trajectory_data(trajFNManager, args, burnin=GLOBAL_TRAJ_BURNIN, burnout=GLOBAL_TRAJ_END)
+        
+            [(trajObservables2, uniq_trajtypes2, uniq_trajRepeats2, uniq_trajThermos2),
+                            (obs_name2, obs_title2, Ts)] = load_trajectory_data(trajFNManager, args, obs_index=1, burnin=GLOBAL_TRAJ_BURNIN, burnout=GLOBAL_TRAJ_END)
 
             #print(observables1)
-            #print(uniq_types1, uniq_repeats1, uniq_thermos1)
+            #print(uniq_trajtypes, uniq_trajRepeats, uniq_trajThermos)
 
             # Filter invalid pairs once so the filtered observables can be reused later.
-            filtered_observables1 = np.full_like(trajObservables, np.nan, dtype=float)
-            filtered_observables2 = np.full_like(observables2, np.nan, dtype=float)
+            clean_trajObservables1 = np.full_like(trajObservables, np.nan, dtype=float)
+            clean_trajObservables2 = np.full_like(trajObservables2, np.nan, dtype=float)
             for typeIx in range(len(uniq_trajtypes)):
                 for repeatIx in range(len(uniq_trajRepeats)):
                     for thermoIx in range(len(uniq_trajThermos)):
                         X = trajObservables[typeIx, repeatIx, thermoIx, 0, :]
-                        Y = observables2[typeIx, repeatIx, thermoIx, 0, :]
+                        Y = trajObservables2[typeIx, repeatIx, thermoIx, 0, :]
                         valid = np.isfinite(X) & np.isfinite(Y)
-                        filtered_observables1[typeIx, repeatIx, thermoIx, 0, valid] = X[valid]
-                        filtered_observables2[typeIx, repeatIx, thermoIx, 0, valid] = Y[valid]
+                        clean_trajObservables1[typeIx, repeatIx, thermoIx, 0, valid] = X[valid]
+                        clean_trajObservables2[typeIx, repeatIx, thermoIx, 0, valid] = Y[valid]
 
             # Prepare constants for 2D histogram calculations
             kB = 0.008314462618
+            # temperatures = {
+            #     "ala1": [300.0, 370, 456.333333, 562.811111, 694.133704, 856.098235, 1055.854489, 1302.220537, 1606.071995, 1980.822128, 2443.013957, 3013.050548, 3716.095675, 4583.184666],
+            #     "trpch": [300.0, 400.0, 500.0]
+            # }
             temperatures = {
-                "ala1": [300.0, 370, 456.333333, 562.811111, 694.133704, 856.098235, 1055.854489, 1302.220537, 1606.071995, 1980.822128, 2443.013957, 3013.050548, 3716.095675, 4583.184666],
-                "trpch": [300.0, 400.0, 500.0]
+                "ala1" : Ts
             }
 
             # Calculate 2D histograms, transition probabilities and mean first passage times (MFPTs)
@@ -2535,8 +2596,8 @@ def main(args):
             for typeIx in range(len(uniq_trajtypes)):
                 for repeatIx in range(len(uniq_trajRepeats)):
                     for thermoIx in range(len(uniq_trajThermos)):
-                        X = filtered_observables1[typeIx, repeatIx, thermoIx, 0, :]
-                        Y = filtered_observables2[typeIx, repeatIx, thermoIx, 0, :]
+                        X = clean_trajObservables1[typeIx, repeatIx, thermoIx, 0, :]
+                        Y = clean_trajObservables2[typeIx, repeatIx, thermoIx, 0, :]
 
                         # If observable values are in radians, convert to degrees for display.
                         if np.nanmax(np.abs(X)) <= (np.pi + 0.1):
@@ -2597,8 +2658,8 @@ def main(args):
                         for thermoIx in range(len(uniq_trajThermos)):
                             print(f"Type {uniq_trajtypes[typeIx]} Repeat {uniq_trajRepeats[repeatIx]} Thermo {uniq_trajThermos[thermoIx]}")
 
-                            phi = filtered_observables1[typeIx, repeatIx, thermoIx, 0, :]
-                            psi = filtered_observables2[typeIx, repeatIx, thermoIx, 0, :]
+                            phi = clean_trajObservables1[typeIx, repeatIx, thermoIx, 0, :]
+                            psi = clean_trajObservables2[typeIx, repeatIx, thermoIx, 0, :]
 
                             valid = np.isfinite(phi) & np.isfinite(psi)
                             if not np.any(valid):
