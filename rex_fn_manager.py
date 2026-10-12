@@ -408,10 +408,11 @@ class REXFNManager:
             print(f"  Transforming {os.path.basename(FN)} ...", end=" ", flush=True)
             
             traj = md.load_dcd(FN, top=top, stride=1)[:min_n_frames]
-            traj.xyz = traj.xyz.astype('float32')
+            traj.xyz = traj.xyz.astype('float32') #  shape (n_frames, n_atoms, 3)
             traj.superpose(ref_frame, atom_indices=selection)
-            
-            X = traj.xyz[:, selection, :].reshape(traj.n_frames, -1)
+
+            X = traj.xyz[:, selection, :].reshape(traj.n_frames, -1) # shape (n_frames, n_selected_atoms*3)
+
             proj = ipca.transform(X)
 
             typeIx = np.searchsorted(uniq_sorted_types, int(s_type))
