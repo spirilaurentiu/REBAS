@@ -12,13 +12,13 @@ from observables import Observables
 class REXTrajData:
     """Read a single DCD trajectory using MDTraj."""
 
+    # Loads the trajectory
     def __init__(self, filepath, topology="trpch/ligand.prmtop"):
         self.filepath = filepath
         self.topology = topology
         self.traj = self._load_trajectory()
         self._bat_indices = None
         
-                
         self._observables = {
             "distance": lambda t, pair: md.compute_distances(t, [pair]),
             "rg": lambda t: md.compute_rg(t),
@@ -26,17 +26,21 @@ class REXTrajData:
         }        
     #
 
+    # Get BAT indices for the trajectory
     def _get_bat_indices(self):
         """Build and cache BAT indices from trajectory topology."""
         if self._bat_indices is None:
             self._bat_indices = BATIndexBuilder.from_topology(self.traj.topology)
         return self._bat_indices
+    #
 
+    # Compute BAT-space RMSF from trajectory
     def _compute_bat_rmsf(self, traj):
         """Compute BAT-space RMSF from a trajectory slice or full trajectory."""
         boIxs, angIxs, dihIxs = self._get_bat_indices()
         bos, angs, dihs = Observables.compute_bat_values(traj, boIxs, angIxs, dihIxs)
         return Observables.compute_bat_rmsf(bos, angs, dihs)
+    #
 
     # Actually helper for __init__, but kept separate for clarity and potential reuse
     def _load_trajectory(self):
@@ -59,8 +63,8 @@ class REXTrajData:
     #
 
     # Get XYZ coordinates for PCA or other analyses
-    def get_xyz(self, traj, superpose=True):
-        selection = self.traj.top.select("name CA")
+    def get_xyz(self, selection_string="name CA", superpose=True):
+        selection = self.traj.top.select(selection_string)
         if superpose:
             self.traj.superpose(self.traj, frame=0, atom_indices=selection)
 

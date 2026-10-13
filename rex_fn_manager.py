@@ -47,7 +47,7 @@ class REXFNManager:
         self.OUTPUT_DATA = False
         self.TRAJECTORY_DATA = False
         
-        self.entries, (self.n_types, self.n_sims, self.n_reps) = None, (0, 0, 0)
+        self.entries, self.n_types, self.n_sims, self.n_reps = None, 0, 0, 0
         #self.rexTrajData = None
 
     # Get seed and simulation type from filename. Determine if OUT or DCD

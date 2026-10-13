@@ -6,6 +6,7 @@ import os
 import re
 import sys
 import glob
+import tempfile
 import time
 from turtle import title
 import pandas as pd
@@ -400,6 +401,49 @@ def load_output_data(args, burnin):
         return out_df
 #
 
+# Recover replica mapping
+def get_replica_thermo_mappings(out_df):
+    """  Recover the mapping between replica indices and thermodynamic state indices.
+
+    Args:
+        out_df (pd.DataFrame): The output DataFrame containing simulation data.
+
+    Returns:
+        tuple: A tuple containing:
+            - replica_thermo_mappings (list of np.ndarray): List of arrays mapping replica indices to thermodynamic state indices.
+            - out_observables_meta (list of dict): List of metadata dictionaries for each group.
+            - out_max_nof_replicas (int): Maximum number of replicas across all groups.
+    """
+
+    replica_thermo_mappings = []
+    out_observables_meta = []
+    out_max_nof_replicas = 0
+    ix = -1
+    for (sim_type, seed), subdf_group in out_df.groupby(["sim_type", "seed"]):
+        ix += 1
+        print(f"Processing sim_type={sim_type}, seed={seed} (group {ix})")
+        #print(subdf_group)
+
+        # Filter the sub-dataframe by wIx=0
+        subdf_group = subdf_group[subdf_group["wIx"] == 0]
+
+        repIxs = subdf_group["replicaIx"].to_numpy()
+        theIxs = subdf_group["thermoIx"].to_numpy()
+        concatData = np.concatenate(([repIxs], [theIxs]), axis=0)
+        print("============= repIxs theIxs concatData")
+        print(repIxs.shape, theIxs.shape, concatData.shape)
+
+        replica_thermo_mappings.append(concatData)
+        out_observables_meta.append({
+            "sim_type": sim_type,
+            "seed": seed,})
+
+        curr_max_nof_replicas = repIxs.max() + 1
+        out_max_nof_replicas = max(out_max_nof_replicas, curr_max_nof_replicas)
+
+    return replica_thermo_mappings, out_observables_meta, out_max_nof_replicas
+#
+
 # Set a dictionary for observables based on molecule name
 FIGURES_DICT = {
     "traj_stats_0D": {
@@ -486,7 +530,7 @@ FIGURES_DICT = {
             "firstDeltaT" : 8.0
         }
     },
-    "recover_replica": {
+    "recover_replica_obs": {
         "ethane": {
             "obs_funcs" : [Observables.dihedral_a1_a2_a3_a4],
             "obs_funcs_args" : [{"a1":2, "a2":0, "a3":1, "a4":7}],
@@ -574,7 +618,7 @@ FIGURES_DICT = {
 
 
 # Get trajectory data
-def load_trajectory_data(trajFNManager, args, obs_index=0, burnin=0, burnout=None):
+def load_trajectory_observable(trajFNManager, args, obs_index=0, burnin=0, burnout=None):
 
     if args.moleculeName not in args.dir:
         print(f"Error: moleculeName '{args.moleculeName}' not found in directory path '{args.dir}'.")
@@ -700,12 +744,29 @@ def load_trajectory_data(trajFNManager, args, obs_index=0, burnin=0, burnout=Non
 # grouped: pandas.core.groupby.DataFrameGroupBy object = lazy grouping object - essentially a recipe for how the DataFrame should be grouped
 # group: a tuple (name, dataframe)
 #endregion
+                #region Panda_Study
+                #print("out_df:\n", out_df)
+                #grouped = out_df.groupby(['replicaIx'])
+                #print("\n\nout_df.groupby(['replicaIx']):\n")
+                #for name, df in grouped:
+                #    print("Group:", name)
+                #    print(df)
+                #print("\n\nout_df.info:\n", out_df.info())
+                #print("\n\nout_df.index:\n", out_df.index)
+                #print("\nout_df.columns:\n", out_df.columns)
+                #print("\nout_df.dtypes:\n", out_df.dtypes)
+                #print("out_df.axes:\n", out_df.axes)
+                #print("\n\nout_df.keys():\n", out_df.keys())
+                #print('\n\nout_df.get("thermoIx"):\n', out_df.get("thermoIx"))
+                # exit(2)
+                #endregion Panda_Study
 # -----------------------------------------------------------------------------
 # MAIN
 # -----------------------------------------------------------------------------
 def main(args):
 
     DRILL_REQUIRED, OUTPUT_REQUIRED, TRAJECTORY_REQUIRED = False, False, False # default flags
+    out_df = None
 
     # Check if drill data is requested
     if args.drill:
@@ -713,6 +774,8 @@ def main(args):
 
     if args.inFNRoots is not None:
         OUTPUT_REQUIRED = True
+        out_df = load_output_data(args, burnin = 0)
+        out_df.info()
 
     if args.inTrajFNRoots is not None:
         TRAJECTORY_REQUIRED = True
@@ -722,7 +785,8 @@ def main(args):
     print("TRAJECTORY_REQUIRED:", TRAJECTORY_REQUIRED)
 
     trajFNManager = None # classes
-    out_df, traj_df = None, None # pandas
+    traj_df = None # pandas
+    trajFNManager = REXFNManager(args.dir, args.inTrajFNRoots, args.cols, topology=args.topology)
 
     stats = LS_Statistics()
 
@@ -848,71 +912,286 @@ def main(args):
 
     if OUTPUT_REQUIRED and TRAJECTORY_REQUIRED:
 
+
+        if "recover_replica_traj" in args.figures:
+            replica_thermo_mappings, out_observables_meta, out_max_nof_replicas = get_replica_thermo_mappings(out_df)
+
+            # Print a summary
+            if True:
+                SOME_PRINT_BURNIN = 0
+                print("Replica-Thermo Mapping:")
+                #print(out_observables[0][:, SOME_PRINT_BURNIN:])
+                #print(out_observables[0].T[SOME_PRINT_BURNIN:])
+                for rtIx, replica_thermo in enumerate(replica_thermo_mappings):
+                    if rtIx > 1:
+                        break
+                    for rtEntryIx, rtEntry in enumerate(replica_thermo.T[SOME_PRINT_BURNIN:]):
+                        print("repIx, theIx,",  rtEntry[0], rtEntry[1])
+                        if rtEntryIx > (out_max_nof_replicas):
+                            break
+                #sys.exit("Exiting after printing replica-thermo mapping.")
+
+            #region Get filters if specified
+            # Get filters if specified
+            filters = {}
+            if args.filterTrajBy:
+                filters = parse_filters(args.filterTrajBy)
+                for col, val in filters.items():
+                    print(f"filter: {col} = {val}")
+            #endregion
+
+            # Populate FNmanager entries and sort them
+            trajFNManager.prepareTrajArraySize(filters=filters)
+
+            chunk_size = 100
+            print("trajFNManager.entries", trajFNManager.entries)
+
+            for mapping_ix, (replica_thermo, mapping_meta) in enumerate(
+                zip(replica_thermo_mappings, out_observables_meta)
+            ):
+                sim_type = int(mapping_meta["sim_type"])
+                seed = int(mapping_meta["seed"])
+                source_dcds = {}
+
+                for traj_entry in trajFNManager.entries:
+                    traj_sim_type = int(traj_entry[0])
+                    traj_seed = int(traj_entry[1])
+                    thermo_ix = int(traj_entry[3])
+                    traj_filename = traj_entry[4]
+
+                    if traj_sim_type != sim_type or traj_seed != seed:
+                        continue
+                    if thermo_ix in source_dcds:
+                        raise ValueError(
+                            f"Duplicate trajectory for sim_type={sim_type}, seed={seed}, "
+                            f"thermo={thermo_ix}."
+                        )
+                    source_dcds[thermo_ix] = traj_filename
+
+                if not source_dcds:
+                    raise ValueError(
+                        f"No trajectories found for mapping group {mapping_ix}: "
+                        f"sim_type={sim_type}, seed={seed}."
+                    )
+
+                replica_ids = np.unique(replica_thermo[0].astype(int))
+                expected_replica_ids = np.arange(replica_ids[-1] + 1)
+                if not np.array_equal(replica_ids, expected_replica_ids):
+                    raise ValueError(
+                        f"Replica indices must be contiguous from zero; found {replica_ids.tolist()} "
+                        f"for sim_type={sim_type}, seed={seed}."
+                    )
+
+                thermo_walks = {}
+                for replica_ix in replica_ids:
+                    thermo_walk = replica_thermo[1, replica_thermo[0] == replica_ix].astype(int)
+                    if GLOBAL_TRAJ_BURNIN >= len(thermo_walk):
+                        raise ValueError(
+                            f"Burn-in {GLOBAL_TRAJ_BURNIN} removes all {len(thermo_walk)} frames "
+                            f"for replica {replica_ix}, sim_type={sim_type}, seed={seed}."
+                        )
+                    thermo_walks[int(replica_ix)] = thermo_walk[GLOBAL_TRAJ_BURNIN:]
+
+                walk_lengths = {len(walk) for walk in thermo_walks.values()}
+                if len(walk_lengths) != 1:
+                    raise ValueError(
+                        f"Replica mappings have different frame counts for sim_type={sim_type}, "
+                        f"seed={seed}: {sorted(walk_lengths)}."
+                    )
+                n_frames = walk_lengths.pop()
+
+                referenced_thermos = set(
+                    np.concatenate(list(thermo_walks.values())).astype(int).tolist()
+                )
+                available_thermos = set(source_dcds)
+                if referenced_thermos != available_thermos:
+                    raise ValueError(
+                        f"Thermodynamic-state mismatch for sim_type={sim_type}, seed={seed}; "
+                        f"mapping={sorted(referenced_thermos)}, trajectories={sorted(available_thermos)}."
+                    )
+
+                output_dir = tempfile.gettempdir()
+                output_paths = {
+                    replica_ix: os.path.join(
+                        output_dir,
+                        f"{args.moleculeName}_{seed}.realreplica{replica_ix}.dcd",
+                    )
+                    for replica_ix in replica_ids
+                }
+                existing_outputs = [path for path in output_paths.values() if os.path.exists(path)]
+                if existing_outputs:
+                    raise FileExistsError(
+                        "Refusing to overwrite recovered replica trajectories: "
+                        + ", ".join(existing_outputs)
+                    )
+
+                partial_paths = {
+                    replica_ix: output_path + ".partial"
+                    for replica_ix, output_path in output_paths.items()
+                }
+                stale_partials = [path for path in partial_paths.values() if os.path.exists(path)]
+                if stale_partials:
+                    raise FileExistsError(
+                        "Remove stale partial replica trajectories before retrying: "
+                        + ", ".join(stale_partials)
+                    )
+
+                source_iterators = {
+                    thermo_ix: iter(md.iterload(
+                        source_dcds[thermo_ix],
+                        top=args.topology,
+                        chunk=chunk_size,
+                        skip=GLOBAL_TRAJ_BURNIN,
+                    ))
+                    for thermo_ix in sorted(referenced_thermos)
+                }
+                output_writers = {}
+                completed = False
+
+                try:
+                    output_writers = {
+                        int(replica_ix): md.formats.DCDTrajectoryFile(
+                            partial_paths[int(replica_ix)],
+                            mode="w",
+                            force_overwrite=False,
+                        )
+                        for replica_ix in replica_ids
+                    }
+
+                    frame_start = 0
+                    while frame_start < n_frames:
+                        source_chunks = {}
+                        exhausted_thermos = []
+                        for thermo_ix, source_iterator in source_iterators.items():
+                            try:
+                                source_chunks[thermo_ix] = next(source_iterator)
+                            except StopIteration:
+                                exhausted_thermos.append(thermo_ix)
+
+                        if exhausted_thermos:
+                            raise ValueError(
+                                f"Trajectory states {exhausted_thermos} ended before mapping frame "
+                                f"{frame_start} for sim_type={sim_type}, seed={seed}."
+                            )
+
+                        chunk_lengths = {chunk.n_frames for chunk in source_chunks.values()}
+                        atom_counts = {chunk.n_atoms for chunk in source_chunks.values()}
+                        if len(chunk_lengths) != 1 or len(atom_counts) != 1:
+                            raise ValueError(
+                                f"Source DCD chunks are incompatible for sim_type={sim_type}, "
+                                f"seed={seed}: frames={sorted(chunk_lengths)}, atoms={sorted(atom_counts)}."
+                            )
+
+                        source_chunk_frames = chunk_lengths.pop()
+                        remaining_mapping_frames = n_frames - frame_start
+                        if source_chunk_frames > remaining_mapping_frames:
+                            raise ValueError(
+                                f"Source DCDs contain more frames than the mapping for "
+                                f"sim_type={sim_type}, seed={seed}."
+                            )
+                        frames_to_write = source_chunk_frames
+                        frame_end = frame_start + frames_to_write
+                        sample_chunk = next(iter(source_chunks.values()))
+                        has_unitcell = sample_chunk.unitcell_lengths is not None
+                        if any(
+                            (chunk.unitcell_lengths is not None) != has_unitcell
+                            or (chunk.unitcell_angles is not None) != has_unitcell
+                            for chunk in source_chunks.values()
+                        ):
+                            raise ValueError(
+                                f"Source DCD unit-cell metadata is inconsistent for "
+                                f"sim_type={sim_type}, seed={seed}."
+                            )
+
+                        for replica_ix, thermo_walk in thermo_walks.items():
+                            states = thermo_walk[frame_start:frame_end]
+                            replica_xyz = np.empty(
+                                (frames_to_write, sample_chunk.n_atoms, 3),
+                                dtype=sample_chunk.xyz.dtype,
+                            )
+                            assigned = np.zeros(frames_to_write, dtype=bool)
+
+                            if has_unitcell:
+                                replica_cell_lengths = np.empty(
+                                    (frames_to_write, 3),
+                                    dtype=sample_chunk.unitcell_lengths.dtype,
+                                )
+                                replica_cell_angles = np.empty(
+                                    (frames_to_write, 3),
+                                    dtype=sample_chunk.unitcell_angles.dtype,
+                                )
+
+                            for thermo_ix, source_chunk in source_chunks.items():
+                                selected = states == thermo_ix
+                                if not selected.any():
+                                    continue
+                                replica_xyz[selected] = source_chunk.xyz[:frames_to_write][selected]
+                                assigned[selected] = True
+                                if has_unitcell:
+                                    replica_cell_lengths[selected] = \
+                                        source_chunk.unitcell_lengths[:frames_to_write][selected]
+                                    replica_cell_angles[selected] = \
+                                        source_chunk.unitcell_angles[:frames_to_write][selected]
+
+                            if not assigned.all():
+                                missing_states = np.unique(states[~assigned]).tolist()
+                                raise ValueError(
+                                    f"No source coordinates for thermo states {missing_states}, "
+                                    f"replica={replica_ix}, frames={frame_start}:{frame_end}."
+                                )
+
+                            if has_unitcell:
+                                output_writers[replica_ix].write(
+                                    replica_xyz,
+                                    cell_lengths=replica_cell_lengths,
+                                    cell_angles=replica_cell_angles,
+                                )
+                            else:
+                                output_writers[replica_ix].write(replica_xyz)
+
+                        frame_start = frame_end
+                        print(
+                            f"Recovered frames {frame_start}/{n_frames} for "
+                            f"sim_type={sim_type}, seed={seed}.",
+                            flush=True,
+                        )
+
+                    for thermo_ix, source_iterator in source_iterators.items():
+                        try:
+                            extra_chunk = next(source_iterator)
+                        except StopIteration:
+                            continue
+                        if extra_chunk.n_frames:
+                            raise ValueError(
+                                f"Trajectory state {thermo_ix} has more frames than its mapping "
+                                f"for sim_type={sim_type}, seed={seed}."
+                            )
+
+                    completed = True
+                finally:
+                    for writer in output_writers.values():
+                        writer.close()
+                    for source_iterator in source_iterators.values():
+                        close_iterator = getattr(source_iterator, "close", None)
+                        if close_iterator is not None:
+                            close_iterator()
+                    if not completed:
+                        for partial_path in partial_paths.values():
+                            if os.path.exists(partial_path):
+                                os.remove(partial_path)
+
+                for replica_ix in replica_ids:
+                    replica_ix = int(replica_ix)
+                    os.replace(partial_paths[replica_ix], output_paths[replica_ix])
+                    print(f"Wrote recovered replica trajectory: {output_paths[replica_ix]}")
+
         # -----------------------------------------------------------------------------
-        # Read trajectory data from all files
+        # Read trajectory data from all files by replica
         # -----------------------------------------------------------------------------
-        #region Get filters if specified
-        # Get filters if specified
-        # filters = {}
-        # if args.filterTrajBy:
-        #     filters = parse_filters(args.filterTrajBy)
-        #     for col, val in filters.items():
-        #         print(f"filter: {col} = {val}")
-        #endregion
+        if "recover_replica_obs" in args.figures:
 
-        trajFNManager = REXFNManager(args.dir, args.inTrajFNRoots, args.cols, topology=args.topology)
-        #trajFNManager.prepareTrajArraySize(filters=filters)
-
-        if "recover_replica" in args.figures:
-
-                # Read output from all files
-                out_df = load_output_data(args, burnin = GLOBAL_TRAJ_BURNIN)
-                out_df.info()
-                #print("outf_df info:\n", out_df.info())
-
-                #region Panda_Study
-                #print("out_df:\n", out_df)
-                #grouped = out_df.groupby(['replicaIx'])
-                #print("\n\nout_df.groupby(['replicaIx']):\n")
-                #for name, df in grouped:
-                #    print("Group:", name)
-                #    print(df)
-                #print("\n\nout_df.info:\n", out_df.info())
-                #print("\n\nout_df.index:\n", out_df.index)
-                #print("\nout_df.columns:\n", out_df.columns)
-                #print("\nout_df.dtypes:\n", out_df.dtypes)
-                #print("out_df.axes:\n", out_df.axes)
-                #print("\n\nout_df.keys():\n", out_df.keys())
-                #print('\n\nout_df.get("thermoIx"):\n', out_df.get("thermoIx"))
-                # exit(2)
-                #endregion Panda_Study
-
-                #region Read thermo2replica mapping
-                replica_thermo_mappings = []
-                out_observables_meta = []
-                out_max_nof_replicas = 0
-                ix = -1
-                for (sim_type, seed), subdf_group in out_df.groupby(["sim_type", "seed"]):
-                    ix += 1
-                    print(f"Processing sim_type={sim_type}, seed={seed} (group {ix})")
-                    #print(subdf_group)
-
-                    # Filter the sub-dataframe by wIx=0
-                    subdf_group = subdf_group[subdf_group["wIx"] == 0]
-
-                    repIxs = subdf_group["replicaIx"].to_numpy()
-                    theIxs = subdf_group["thermoIx"].to_numpy()
-                    concatData = np.concatenate(([repIxs], [theIxs]), axis=0)
-                    print("============= repIxs theIxs concatData")
-                    print(repIxs.shape, theIxs.shape, concatData.shape)
-
-                    replica_thermo_mappings.append(concatData)
-                    out_observables_meta.append({
-                        "sim_type": sim_type,
-                        "seed": seed,})
-
-                    curr_max_nof_replicas = repIxs.max() + 1
-                    out_max_nof_replicas = max(out_max_nof_replicas, curr_max_nof_replicas)
+                # Get the replica-thermo mappings: list of (2, nframes) np arrays
+                replica_thermo_mappings, out_observables_meta, out_max_nof_replicas = get_replica_thermo_mappings(out_df)
 
                 # Print a summary
                 if True:
@@ -925,18 +1204,16 @@ def main(args):
                             break
                         for rtEntryIx, rtEntry in enumerate(replica_thermo.T[SOME_PRINT_BURNIN:]):
                             print("repIx, theIx,",  rtEntry[0], rtEntry[1])
-                            if rtEntryIx > (5):
+                            if rtEntryIx > (out_max_nof_replicas):
                                 break
                     #sys.exit("Exiting after printing replica-thermo mapping.")
-
-                #endregion Read observables
 
                 # -----------------------------------------------------------------------------
                 # Read trajectory data from all files
                 # -----------------------------------------------------------------------------
-
                 [(trajObservables, uniq_trajtypes, uniq_trajRepeats, uniq_trajThermos),
-                    (trajObs_name, trajObs_title, Ts)] = load_trajectory_data(trajFNManager, args, obs_index=0, burnin=GLOBAL_TRAJ_BURNIN, burnout=GLOBAL_TRAJ_END)
+                    (trajObs_name, trajObs_title, Ts)] = load_trajectory_observable(
+                        trajFNManager, args, obs_index=0, burnin=0, burnout=None)
 
                 print("trajObservables.shape", trajObservables.shape)
                 n_trajTypes, n_trajRepeats, n_trajThermos, n_trajObservables, n_trajFrames = trajObservables.shape
@@ -944,7 +1221,8 @@ def main(args):
                 #print("FNManager entries:", FNManager.entries)
                 #print("trajFNManager entries:", trajFNManager.entries)
 
-                # Iterate simulation types: obs and obs_meta go together
+                # Get replica trajectory observables NOT THERMOSTATE
+                print("Getting replica trajectory observables...")
                 print("WARNING: The code assumes output entry frameIx corresponds to trajectory frame frameIx.")
                 print("That alignment depends on how often output rows and DCD frames are recorded.")
                 min_output_frames = min(
@@ -991,7 +1269,6 @@ def main(args):
                     if trajTypeIx is None or trajRepeatIx is None:
                         raise ValueError("Matching trajectory type and repeat not found.")
                     else:
-                        #print("Selected trajectory type and repeat values:", trajType, trajRepeat)
 
                         # Get back to the selected replica and its corresponding thermo indices
                         for justThisReplIx in range(out_max_nof_replicas): # Replace with the actual number of replicas
@@ -1005,7 +1282,6 @@ def main(args):
                                 #print("Processing frame and thermo index:", frameIx, selected_thermoIx)
 
                                 for trajObsIx in range(n_trajObservables):
-                                    #trajObsIx = 0 # for now
 
                                     if frameIx >= np.size(trajObservables[trajTypeIx, trajRepeatIx, selected_thermoIx, trajObsIx, :]):
                                         continue
@@ -1017,87 +1293,87 @@ def main(args):
 
                                     merged_obs[trajTypeIx, trajRepeatIx, justThisReplIx, trajObsIx, frameIx] = traj_obs
                             
-        print("Merged observables shape:", merged_obs.shape)
-        print("Merged observables array:", merged_obs)
+                print("Merged observables shape:", merged_obs.shape)
+                print("Merged observables array:", merged_obs)
 
-        # Plot merged observables for verification and color by type
-        if True:
-            fig, ax = plt.subplots()
-            for trajTypeIx in range(merged_obs.shape[0]):
-                if trajTypeIx == 0:
-                    color = 'black'
-                elif trajTypeIx == 1:
-                    color = 'red'
-                else:
-                    color = 'gray'
-                for trajRepeatIx in range(merged_obs.shape[1]):
-                    for justThisReplIx in range(merged_obs.shape[2]):
-                        for trajObsIx in range(merged_obs.shape[3]):
-                            ax.plot((merged_obs[trajTypeIx, trajRepeatIx, justThisReplIx, trajObsIx, :][20:50]),
-                                    label=f"TT{trajTypeIx}_TR{trajRepeatIx}_R{justThisReplIx}_O{trajObsIx}",
-                                    color=color)
-            ax.legend()
-            plt.show()
-
-
-            # =============================================================
-            # AUTOCORRELATION FUNCTION (ACF) Calculate
-            # =============================================================
-            #region Autocorrelation function (ACF) calculate
-            max_lag = 50000
-            BURN_IN_FOR_ACOR = 1000
-            ACF_rhos = np.full((n_trajTypes, n_trajRepeats, n_trajThermos, n_trajObservables, max_lag), fill_value=np.nan)
-            for trajTypeIx in range(n_trajTypes):
-                for trajRepeatIx in range(n_trajRepeats):
-                    for thermoIx in range(n_trajThermos):
-                        for trajObsIx in range(n_trajObservables):
-                            obs = merged_obs[trajTypeIx, trajRepeatIx, thermoIx, trajObsIx, BURN_IN_FOR_ACOR:]
-                            finite = np.isfinite(obs)
-
-                            if not finite.any():
-                                continue
-
-                            last_finite = np.flatnonzero(finite)[-1]
-                            obs = obs[:last_finite + 1]
-
-                            if not np.isfinite(obs).all():
-                                print(
-                                    f"Skipping non-contiguous observable data: "
-                                    f"type={uniq_trajtypes[trajTypeIx]}, repeat={uniq_trajRepeats[trajRepeatIx]}, "
-                                    f"thermo={uniq_trajThermos[thermoIx]}, obs={trajObsIx}"
-                                )
-                                continue
-
-                            rho, obs_tau, ess, t0_clean = stats.autocorr2_revised(
-                                obs,
-                                max_lag=max_lag,
-                                detect_equilibration=False
-                            )
-                            ACF_rhos[trajTypeIx, trajRepeatIx, thermoIx, trajObsIx, :len(rho)] = rho
-
-                            print(f"Type {uniq_trajtypes[trajTypeIx]} Repeat {uniq_trajRepeats[trajRepeatIx]} Thermo {uniq_trajThermos[thermoIx]}"
-                                f" Obs {trajObsIx}: tau_ac={obs_tau:.3f}, ESS={ess:.3f}, t0_clean={t0_clean}")
+                # Plot merged observables for verification and color by type
+                if True:
+                    fig, ax = plt.subplots()
+                    for trajTypeIx in range(merged_obs.shape[0]):
+                        if trajTypeIx == 0:
+                            color = 'black'
+                        elif trajTypeIx == 1:
+                            color = 'red'
+                        else:
+                            color = 'gray'
+                        for trajRepeatIx in range(merged_obs.shape[1]):
+                            for justThisReplIx in range(merged_obs.shape[2]):
+                                for trajObsIx in range(merged_obs.shape[3]):
+                                    ax.plot((merged_obs[trajTypeIx, trajRepeatIx, justThisReplIx, trajObsIx, :][20:50]),
+                                            label=f"TT{trajTypeIx}_TR{trajRepeatIx}_R{justThisReplIx}_O{trajObsIx}",
+                                            color=color)
+                    ax.legend()
+                    plt.show()
 
 
-            # Plot ACF_rhos and color by type
-            plt.figure()
-            for trajTypeIx in range(n_trajTypes):
-                color = "black" if trajTypeIx == 1 else "red"
-                for trajRepeatIx in range(n_trajRepeats):
-                    for thermoIx in range(n_trajThermos):
-                        for trajObsIx in range(n_trajObservables):
-                            rho = ACF_rhos[trajTypeIx, trajRepeatIx, thermoIx, trajObsIx, :]
-                            if np.all(np.isnan(rho)):
-                                continue
-                            plt.plot(rho, color=color, label=f"Type {uniq_trajtypes[trajTypeIx]} Repeat {uniq_trajRepeats[trajRepeatIx]}"
-                                    f" Thermo {uniq_trajThermos[thermoIx]} Obs {trajObsIx}")
-            
-            plt.xlabel("Lag")
-            plt.ylabel("ACF")
-            plt.legend()
-            plt.show()
+                    # =============================================================
+                    # AUTOCORRELATION FUNCTION (ACF) Calculate
+                    # =============================================================
+                    #region Autocorrelation function (ACF) calculate
+                    max_lag = 50000
+                    BURN_IN_FOR_ACOR = 1000
+                    ACF_rhos = np.full((n_trajTypes, n_trajRepeats, n_trajThermos, n_trajObservables, max_lag), fill_value=np.nan)
+                    for trajTypeIx in range(n_trajTypes):
+                        for trajRepeatIx in range(n_trajRepeats):
+                            for thermoIx in range(n_trajThermos):
+                                for trajObsIx in range(n_trajObservables):
+                                    obs = merged_obs[trajTypeIx, trajRepeatIx, thermoIx, trajObsIx, BURN_IN_FOR_ACOR:]
+                                    finite = np.isfinite(obs)
 
-            # endregion # Autocorrelation function (ACF) calculate
+                                    if not finite.any():
+                                        continue
+
+                                    last_finite = np.flatnonzero(finite)[-1]
+                                    obs = obs[:last_finite + 1]
+
+                                    if not np.isfinite(obs).all():
+                                        print(
+                                            f"Skipping non-contiguous observable data: "
+                                            f"type={uniq_trajtypes[trajTypeIx]}, repeat={uniq_trajRepeats[trajRepeatIx]}, "
+                                            f"thermo={uniq_trajThermos[thermoIx]}, obs={trajObsIx}"
+                                        )
+                                        continue
+
+                                    rho, obs_tau, ess, t0_clean = stats.autocorr2_revised(
+                                        obs,
+                                        max_lag=max_lag,
+                                        detect_equilibration=False
+                                    )
+                                    ACF_rhos[trajTypeIx, trajRepeatIx, thermoIx, trajObsIx, :len(rho)] = rho
+
+                                    print(f"Type {uniq_trajtypes[trajTypeIx]} Repeat {uniq_trajRepeats[trajRepeatIx]} Thermo {uniq_trajThermos[thermoIx]}"
+                                        f" Obs {trajObsIx}: tau_ac={obs_tau:.3f}, ESS={ess:.3f}, t0_clean={t0_clean}")
+
+
+                    # Plot ACF_rhos and color by type
+                    plt.figure()
+                    for trajTypeIx in range(n_trajTypes):
+                        color = "black" if trajTypeIx == 1 else "red"
+                        for trajRepeatIx in range(n_trajRepeats):
+                            for thermoIx in range(n_trajThermos):
+                                for trajObsIx in range(n_trajObservables):
+                                    rho = ACF_rhos[trajTypeIx, trajRepeatIx, thermoIx, trajObsIx, :]
+                                    if np.all(np.isnan(rho)):
+                                        continue
+                                    plt.plot(rho, color=color, label=f"Type {uniq_trajtypes[trajTypeIx]} Repeat {uniq_trajRepeats[trajRepeatIx]}"
+                                            f" Thermo {uniq_trajThermos[thermoIx]} Obs {trajObsIx}")
+                    
+                    plt.xlabel("Lag")
+                    plt.ylabel("ACF")
+                    plt.legend()
+                    plt.show()
+
+                    # endregion # Autocorrelation function (ACF) calculate
 
 
     elif OUTPUT_REQUIRED and (not TRAJECTORY_REQUIRED):
@@ -1130,8 +1406,8 @@ def main(args):
         # -----------------------------------------------------------------------------
         # Read output from all files
         # -----------------------------------------------------------------------------
-        out_df = load_output_data(args, burnin = GLOBAL_OUTPUT_BURNIN)
-        out_df.info()
+        # out_df = load_output_data(args, burnin = GLOBAL_OUTPUT_BURNIN)
+        # out_df.info()
         #print("outf_df info:\n", out_df.info())
 
         #region Panda_Study
@@ -1736,74 +2012,9 @@ def main(args):
     elif (not OUTPUT_REQUIRED) and TRAJECTORY_REQUIRED:
 
         # # Get trajectory data
-        # if args.moleculeName not in args.dir:
-        #     print(f"Error: moleculeName '{args.moleculeName}' not found in directory path '{args.dir}'.")
-        #     exit(1)
-        # obs_func, obs_func_args, obs_name, obs_title = None, {}, "", ""
-        # obs_func, obs_func_args, obs_name2, obs_title2 = None, {}, "", ""
-        #region if args.moleculeName == "2but":
-        #     obs_func = Observables.distances
-        #     obs_func_args = {"pairs": [[-1, -1]]}
-        #     obs_name = Observables.distances.__name__
-        #     obs_title = "2-butanol Bonds Lengths"
-        #     firstTemperature = 300.0
-        #     firstDeltaT = 600.0
-        # elif args.moleculeName == "ala1":
-        #     obs_func = Observables.dihedral_a1_a2_a3_a4
-        #     obs_func_args = {"a1":4, "a2":6, "a3":8, "a4":14}
-        #     obs_name = Observables.dihedral_a1_a2_a3_a4.__name__
-        #     obs_title = "Dihedral Angle (4,6,8,14)"
-        #     obs_func2 = Observables.dihedral_a1_a2_a3_a4
-        #     obs_func_args2 = {"a1":6, "a2":8, "a3":14, "a4":16}
-        #     obs_name2 = Observables.dihedral_a1_a2_a3_a4.__name__ + "_" + Observables.dihedral_a1_a2_a3_a4.__name__
-        #     obs_title2 = "2D PMF"            
-        #     firstTemperature = 300.0
-        #     firstDeltaT = 50.0
-        # elif args.moleculeName == "trpch":
-        #     obs_func = Observables.distances
-        #     obs_func_args = {"pairs": [[8, 298]]}
-        #     obs_name = Observables.distances.__name__
-        #     obs_title = "Trp-Cage Bonds Lengths"
-        #     obs_func2 = Observables.dihedral_phi_psi
-        #     obs_func_args2 = {"phi_psi": "phi", "resid": 11}
-        #     obs_name2 = Observables.distances.__name__ + "_" + Observables.dihedral_phi_psi.__name__
-        #     obs_title2 = "2D PMF"            
-        #     firstTemperature = 300.0
-        #     firstDeltaT = 30
-        # elif args.moleculeName == "adk":
-        #     obs_func = Observables.distances
-        #     obs_func_args = {"pairs": [[615, 2312]]}
-        #     obs_name = Observables.distances.__name__
-        #     obs_title = "ADK AMPbd-LID Distance"
-        #     firstTemperature = 300.0
-        #     firstDeltaT = 8                    
-        #endregion
-        #region Get filters if specified
-        # # Get filters if specified
-        # filters = {}
-        # if args.filterTrajBy:
-        #     filters = parse_filters(args.filterTrajBy)
-        #     for col, val in filters.items():
-        #         print(f"filter: {col} = {val}")
-        #endregion
-
-        trajFNManager = REXFNManager(args.dir, args.inTrajFNRoots, args.cols, topology=args.topology)
-        # trajFNManager.prepareTrajArraySize(filters=filters)
-        # trajObservables, uniq_trajtypes, uniq_trajRepeats, uniq_trajThermos = None, None, None, None
-        # # pick your frame slice once:
-        # frames = slice(GLOBAL_TRAJ_BURNIN, GLOBAL_TRAJ_END)   # or slice(GLOBAL_BURNIN, None)
-        # (trajObservables, uniq_trajtypes, uniq_trajRepeats, uniq_trajThermos) = trajFNManager.getTrajDataFromAllFiles(
-        #     obs_func,
-        #     filters=filters,
-        #     frames=frames,
-        #     **obs_func_args,
-        #     #phi_psi="psi",  # optional; only for dihedral_phi_psi
-        #     #resid=11,       # optional; only for dihedral_phi_psi
-        #     verbose=False
-        # )
         
         [(trajObservables, uniq_trajtypes, uniq_trajRepeats, uniq_trajThermos),
-            (obs_name, obs_title, Ts)] = load_trajectory_data(trajFNManager, args, obs_index=0, burnin=GLOBAL_TRAJ_BURNIN, burnout=GLOBAL_TRAJ_END)
+            (obs_name, obs_title, Ts)] = load_trajectory_observable(trajFNManager, args, obs_index=0, burnin=GLOBAL_TRAJ_BURNIN, burnout=GLOBAL_TRAJ_END)
 
         # Preliminary statistics
         if "traj_stats_0D" in args.figures:
@@ -2007,7 +2218,7 @@ def main(args):
         # Statistics from any observable from trajectories
         if "traj_stats_1D" in args.figures:
             
-            DO_GEOMETRY, DO_PCA = False, True
+            DO_GEOMETRY, DO_PCA = True, False
 
             if DO_GEOMETRY:
 
@@ -2297,7 +2508,7 @@ def main(args):
                 #endregion
 
                 [(result, uniq_trajtypes, uniq_trajRepeats, uniq_trajThermos),
-                    (obs_name, obs_title, Ts)] = load_trajectory_data(trajFNManager, args, obs_index=-1, burnin=GLOBAL_TRAJ_BURNIN, burnout=GLOBAL_TRAJ_END)
+                    (obs_name, obs_title, Ts)] = load_trajectory_observable(trajFNManager, args, obs_index=-1, burnin=GLOBAL_TRAJ_BURNIN, burnout=GLOBAL_TRAJ_END)
                 #(result, uniq_trajtypes, uniq_trajRepeats, uniq_trajThermos) = trajFNManager.PCA(filters=filters, frames=frames, top=args.topology, verbose=True)
 
                 # traj_infos = [entry['traj_info'] for entry in result]
@@ -2477,40 +2688,11 @@ def main(args):
             obs_func, obs_func_args, obs_name, obs_title = None, {}, "", ""
             obs_func2, obs_func_args2, obs_name2, obs_title2 = None, {}, "", ""
 
-            # if args.moleculeName == "trpch":
-            #     obs_func = Observables.distances
-            #     obs_func_args = {"pairs": [[8, 298]]}
-            #     obs_func2 = Observables.dihedral_phi_psi
-            #     obs_func_args2 = {"phi_psi": "phi", "resid": 11}
-            #     obs_name2 = Observables.distances.__name__ + "_" + Observables.dihedral_phi_psi.__name__
-            #     obs_title2 = "2D"
-            # elif args.moleculeName == "ala1":
-            #     obs_func = Observables.dihedral_a1_a2_a3_a4
-            #     obs_func_args = {"a1":4, "a2":6, "a3":8, "a4":14}
-            #     obs_func2 = Observables.dihedral_a1_a2_a3_a4
-            #     obs_func_args2 = {"a1":6, "a2":8, "a3":14, "a4":16}
-            #     obs_name2 = Observables.dihedral_a1_a2_a3_a4.__name__ + "_" + Observables.dihedral_a1_a2_a3_a4.__name__
-            #     obs_title2 = "2D"
-            # (trajObservables, uniq_trajtypes, uniq_trajRepeats, uniq_trajThermos) = trajFNManager.getTrajDataFromAllFiles(
-            #     obs_func,
-            #     filters=filters,
-            #     frames=frames,
-            #     **obs_func_args,
-            #     verbose=False
-            # )
-            # (observables2, uniq_types2, uniq_repeats2, uniq_thermos2) = trajFNManager.getTrajDataFromAllFiles(
-            #     obs_func2,
-            #     filters=filters,
-            #     frames=frames,
-            #     **obs_func_args2,
-            #     verbose=False
-            # )
-
             [(trajObservables, uniq_trajtypes, uniq_trajRepeats, uniq_trajThermos),
-                (obs_name, obs_title, Ts)] = load_trajectory_data(trajFNManager, args, obs_index=0, burnin=GLOBAL_TRAJ_BURNIN, burnout=GLOBAL_TRAJ_END)
+                (obs_name, obs_title, Ts)] = load_trajectory_observable(trajFNManager, args, obs_index=0, burnin=GLOBAL_TRAJ_BURNIN, burnout=GLOBAL_TRAJ_END)
         
             [(trajObservables2, uniq_trajtypes2, uniq_trajRepeats2, uniq_trajThermos2),
-                            (obs_name2, obs_title2, Ts)] = load_trajectory_data(trajFNManager, args, obs_index=1, burnin=GLOBAL_TRAJ_BURNIN, burnout=GLOBAL_TRAJ_END)
+                            (obs_name2, obs_title2, Ts)] = load_trajectory_observable(trajFNManager, args, obs_index=1, burnin=GLOBAL_TRAJ_BURNIN, burnout=GLOBAL_TRAJ_END)
 
             #print(observables1)
             #print(uniq_trajtypes, uniq_trajRepeats, uniq_trajThermos)
