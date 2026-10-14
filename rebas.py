@@ -388,6 +388,7 @@ def load_output_data(args, burnin):
 
         # Apply filters if specified
         if args.filterBy:
+            print(f"Applying filters to output: {args.filterBy}")
             filters = parse_filters(args.filterBy)
             for col, val in filters.items():
                 if col not in out_df.columns:
@@ -871,6 +872,25 @@ def main(args):
 
 
         if "recover_replica_traj" in args.figures:
+
+            # Get the replica index to be recovered
+            outFilterDict = parse_filters(args.filterBy)
+            realReplicaIxs = None
+
+            for col, val in outFilterDict.items():
+                print(f"Output filter: {col} = {val}")
+
+            if "replicaIx" not in outFilterDict.keys():
+                sys.exit("recover_replica_traj requires replicaIx filter. Exiting")
+
+            if not isinstance(list, type(outFilterDict["replicaIx"])):
+                outFilterDict["replicaIx"] = [outFilterDict["replicaIx"]]
+
+            realReplicaIxs = outFilterDict["replicaIx"]
+
+            print("Replicas to be recovered", realReplicaIxs)
+
+            # Get replica to thermo mapping
             replica_thermo_mappings, out_observables_meta, out_max_nof_replicas = get_replica_thermo_mappings(out_df)
 
             # Print a summary
@@ -884,11 +904,11 @@ def main(args):
                         break
                     for rtEntryIx, rtEntry in enumerate(replica_thermo.T[SOME_PRINT_BURNIN:]):
                         print("repIx, theIx,",  rtEntry[0], rtEntry[1])
-                        if rtEntryIx > (out_max_nof_replicas):
+                        if rtEntryIx > 3: #(out_max_nof_replicas):
                             break
                 #sys.exit("Exiting after printing replica-thermo mapping.")
 
-            #region Get filters if specified
+            #region Get trajectory filters if specified
             # Get filters if specified
             filters = {}
             if args.filterTrajBy:
@@ -917,36 +937,40 @@ def main(args):
             
             rexTrajData.clear()            
             
-            realreplica = np.full(traj_xyz.shape, np.nan)
+            realReplica = np.full(traj_xyz.shape, np.nan)
 
             # Concatenate all trajectory (memory intensive - might not work)
             print("WARNING: It assumes mapping row corresponds to DCD frame")
-            for trajEntryIx, trajEntry in enumerate(trajFNManager.entries, start=0):
-                trajSimType, trajSeed, trajRepeatIx, trajThermoIndex, trajFN = \
-                    trajEntry[0], trajEntry[1], trajEntry[2], trajEntry[3], trajEntry[4]
-                print(f"trajEntryIx: {trajEntryIx}, trajEntry: {trajEntry}")
-                print(f"trajSimType: {trajSimType}, trajSeed: {trajSeed}, trajRepeatIx: {trajRepeatIx}, trajThermoIndex: {trajThermoIndex}, trajFN: {trajFN}")
 
-                rexTrajData = REXTrajData(trajFN, topology=args.topology)
-                traj_xyz = rexTrajData.get_xyz(selection_string="all", superpose=False)
-                
-                for fIx, frame in enumerate(traj_xyz):
+            for realReplicaIx in realReplicaIxs:
 
-                    #print(f"fIx: {fIx}")
-                    #print(f"replica_thermo_mapping.T[fIx]: {replica_thermo_mapping.T[fIx]}, trajThermoIndex: {trajThermoIndex}")
+                for trajEntryIx, trajEntry in enumerate(trajFNManager.entries, start=0):
+                    trajSimType, trajSeed, trajRepeatIx, trajThermoIndex, trajFN = \
+                        trajEntry[0], trajEntry[1], trajEntry[2], trajEntry[3], trajEntry[4]
+                    print(f"trajEntryIx: {trajEntryIx}, trajEntry: {trajEntry}")
+                    print(f"trajSimType: {trajSimType}, trajSeed: {trajSeed}, trajRepeatIx: {trajRepeatIx}, "
+                        f"trajThermoIndex: {trajThermoIndex}, trajFN: {trajFN}")
 
-                    if replica_thermo_mapping.T[fIx][1] == trajThermoIndex:
-                        realreplica[fIx] = traj_xyz[fIx]
+                    rexTrajData = REXTrajData(trajFN, topology=args.topology)
+                    traj_xyz = rexTrajData.get_xyz(selection_string="all", superpose=False)
+                    
+                    for fIx, frame in enumerate(traj_xyz):
 
-                    # if fIx > 5:  # for debugging, limit to first 10 frames
-                    #     break
+                        #print(f"fIx: {fIx}")
+                        #print(f"replica_thermo_mapping.T[fIx]: {replica_thermo_mapping.T[fIx]}, trajThermoIndex: {trajThermoIndex}")
 
-                rexTrajData.clear()
+                        if replica_thermo_mapping.T[fIx][1] == trajThermoIndex:
+                            realReplica[fIx] = traj_xyz[fIx]
 
-            # Write realreplica to dcd file using mdtraj
-            out_dcd_fn = "temp.dcd"
-            traj = md.Trajectory(realreplica, topology=topologyObj)
-            traj.save_dcd(out_dcd_fn)
+                        # if fIx > 5:  # for debugging, limit to first 10 frames
+                        #     break
+
+                    rexTrajData.clear()
+
+                # Write realreplica to dcd file using mdtraj
+                out_dcd_fn = args.moleculeName + "_" + str(trajSeed) + ".realreplica." + str(realReplicaIx) +  ".dcd"
+                traj = md.Trajectory(realReplica, topology=topologyObj)
+                traj.save_dcd(out_dcd_fn)
 
         # -----------------------------------------------------------------------------
         # Read trajectory data from all files by replica
