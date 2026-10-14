@@ -6,7 +6,6 @@ import os
 import re
 import sys
 import glob
-import tempfile
 import time
 from turtle import title
 import pandas as pd
@@ -627,48 +626,6 @@ def load_trajectory_observable(trajFNManager, args, obs_index=0, burnin=0, burno
     obs_name, obs_title = "", ""
     obs_name2, obs_title2 = "", ""
 
-    #region to_del
-    # if args.moleculeName == "2but":
-    #     obs_func = Observables.distances
-    #     obs_func_args = {"pairs": [[-1, -1]]}
-    #     obs_name = Observables.distances.__name__
-    #     obs_title = "2-butanol Bonds Lengths"
-    #     firstTemperature = 300.0
-    #     firstDeltaT = 300.0
-    # elif args.moleculeName == "ala1":
-    #     obs_func = Observables.dihedral_a1_a2_a3_a4
-    #     obs_func_args = {"a1":4, "a2":6, "a3":8, "a4":14}
-    #     obs_name = Observables.dihedral_a1_a2_a3_a4.__name__
-    #     obs_title = "Dihedral Angle (4,6,8,14)"
-    #     obs_func2 = Observables.dihedral_a1_a2_a3_a4
-    #     obs_func_args2 = {"a1":6, "a2":8, "a3":14, "a4":16}
-    #     obs_name2 = Observables.dihedral_a1_a2_a3_a4.__name__ + "_" + Observables.dihedral_a1_a2_a3_a4.__name__
-    #     obs_title2 = "2D PMF"            
-    #     firstTemperature = 300.0
-    #     firstDeltaT = 50.0
-    # elif args.moleculeName == "trpch":
-    #     obs_func = Observables.distances
-    #     if "traj_stats_0D" in args.figures:
-    #         obs_func_args = {"pairs": [[-1, -1]]}
-    #     else:
-    #         obs_func_args = {"pairs": [[8, 298]]}
-    #     obs_name = Observables.distances.__name__
-    #     obs_title = "Trp-Cage Bonds Lengths"
-    #     obs_func2 = Observables.dihedral_phi_psi
-    #     obs_func_args2 = {"phi_psi": "phi", "resid": 11}
-    #     obs_name2 = Observables.distances.__name__ + "_" + Observables.dihedral_phi_psi.__name__
-    #     obs_title2 = "2D PMF"            
-    #     firstTemperature = 300.0
-    #     firstDeltaT = 30
-    # elif args.moleculeName == "adk":
-    #     obs_func = Observables.distances
-    #     obs_func_args = {"pairs": [[615, 2312]]}
-    #     obs_name = Observables.distances.__name__
-    #     obs_title = "ADK AMPbd-LID Distance"
-    #     firstTemperature = 300.0
-    #     firstDeltaT = 8
-    #endregion to_del                    
-
     obs_title = FIGURES_DICT.get(args.figures[0], {}).get(args.moleculeName, {}).get("obs_titles", [None])[0]
     obs_funcs = FIGURES_DICT.get(args.figures[0], {}).get(args.moleculeName, {}).get("obs_funcs", None)
     obs_funcs_args = FIGURES_DICT.get(args.figures[0], {}).get(args.moleculeName, {}).get("obs_funcs_args", None)
@@ -940,250 +897,56 @@ def main(args):
                     print(f"filter: {col} = {val}")
             #endregion
 
+            replica_thermo_mapping = replica_thermo_mappings[0] # for now
+
             # Populate FNmanager entries and sort them
             trajFNManager.prepareTrajArraySize(filters=filters)
+            #print("trajFNManager.entries", trajFNManager.entries)
 
-            chunk_size = 100
-            print("trajFNManager.entries", trajFNManager.entries)
+            firstTrajEntry = trajFNManager.entries[0]
+            trajSimType, trajSeed, trajRepeatIx, trajThermoIndex, trajFN = \
+                firstTrajEntry[0], firstTrajEntry[1], firstTrajEntry[2], firstTrajEntry[3], firstTrajEntry[4]
+            
+            rexTrajData = REXTrajData(trajFN, topology=args.topology)
+            traj_xyz = rexTrajData.get_xyz(selection_string="all", superpose=False)
+            
+            print(f"traj_xyz shape: {traj_xyz.shape}")
+            n_trajFrames, n_trajAtoms, n_trajCoords = traj_xyz.shape
+            
+            topologyObj = rexTrajData.get_traj().topology
+            
+            rexTrajData.clear()            
+            
+            realreplica = np.full(traj_xyz.shape, np.nan)
 
-            for mapping_ix, (replica_thermo, mapping_meta) in enumerate(
-                zip(replica_thermo_mappings, out_observables_meta)
-            ):
-                sim_type = int(mapping_meta["sim_type"])
-                seed = int(mapping_meta["seed"])
-                source_dcds = {}
+            # Concatenate all trajectory (memory intensive - might not work)
+            print("WARNING: It assumes mapping row corresponds to DCD frame")
+            for trajEntryIx, trajEntry in enumerate(trajFNManager.entries, start=0):
+                trajSimType, trajSeed, trajRepeatIx, trajThermoIndex, trajFN = \
+                    trajEntry[0], trajEntry[1], trajEntry[2], trajEntry[3], trajEntry[4]
+                print(f"trajEntryIx: {trajEntryIx}, trajEntry: {trajEntry}")
+                print(f"trajSimType: {trajSimType}, trajSeed: {trajSeed}, trajRepeatIx: {trajRepeatIx}, trajThermoIndex: {trajThermoIndex}, trajFN: {trajFN}")
 
-                for traj_entry in trajFNManager.entries:
-                    traj_sim_type = int(traj_entry[0])
-                    traj_seed = int(traj_entry[1])
-                    thermo_ix = int(traj_entry[3])
-                    traj_filename = traj_entry[4]
+                rexTrajData = REXTrajData(trajFN, topology=args.topology)
+                traj_xyz = rexTrajData.get_xyz(selection_string="all", superpose=False)
+                
+                for fIx, frame in enumerate(traj_xyz):
 
-                    if traj_sim_type != sim_type or traj_seed != seed:
-                        continue
-                    if thermo_ix in source_dcds:
-                        raise ValueError(
-                            f"Duplicate trajectory for sim_type={sim_type}, seed={seed}, "
-                            f"thermo={thermo_ix}."
-                        )
-                    source_dcds[thermo_ix] = traj_filename
+                    #print(f"fIx: {fIx}")
+                    #print(f"replica_thermo_mapping.T[fIx]: {replica_thermo_mapping.T[fIx]}, trajThermoIndex: {trajThermoIndex}")
 
-                if not source_dcds:
-                    raise ValueError(
-                        f"No trajectories found for mapping group {mapping_ix}: "
-                        f"sim_type={sim_type}, seed={seed}."
-                    )
+                    if replica_thermo_mapping.T[fIx][1] == trajThermoIndex:
+                        realreplica[fIx] = traj_xyz[fIx]
 
-                replica_ids = np.unique(replica_thermo[0].astype(int))
-                expected_replica_ids = np.arange(replica_ids[-1] + 1)
-                if not np.array_equal(replica_ids, expected_replica_ids):
-                    raise ValueError(
-                        f"Replica indices must be contiguous from zero; found {replica_ids.tolist()} "
-                        f"for sim_type={sim_type}, seed={seed}."
-                    )
+                    # if fIx > 5:  # for debugging, limit to first 10 frames
+                    #     break
 
-                thermo_walks = {}
-                for replica_ix in replica_ids:
-                    thermo_walk = replica_thermo[1, replica_thermo[0] == replica_ix].astype(int)
-                    if GLOBAL_TRAJ_BURNIN >= len(thermo_walk):
-                        raise ValueError(
-                            f"Burn-in {GLOBAL_TRAJ_BURNIN} removes all {len(thermo_walk)} frames "
-                            f"for replica {replica_ix}, sim_type={sim_type}, seed={seed}."
-                        )
-                    thermo_walks[int(replica_ix)] = thermo_walk[GLOBAL_TRAJ_BURNIN:]
+                rexTrajData.clear()
 
-                walk_lengths = {len(walk) for walk in thermo_walks.values()}
-                if len(walk_lengths) != 1:
-                    raise ValueError(
-                        f"Replica mappings have different frame counts for sim_type={sim_type}, "
-                        f"seed={seed}: {sorted(walk_lengths)}."
-                    )
-                n_frames = walk_lengths.pop()
-
-                referenced_thermos = set(
-                    np.concatenate(list(thermo_walks.values())).astype(int).tolist()
-                )
-                available_thermos = set(source_dcds)
-                if referenced_thermos != available_thermos:
-                    raise ValueError(
-                        f"Thermodynamic-state mismatch for sim_type={sim_type}, seed={seed}; "
-                        f"mapping={sorted(referenced_thermos)}, trajectories={sorted(available_thermos)}."
-                    )
-
-                output_dir = tempfile.gettempdir()
-                output_paths = {
-                    replica_ix: os.path.join(
-                        output_dir,
-                        f"{args.moleculeName}_{seed}.realreplica{replica_ix}.dcd",
-                    )
-                    for replica_ix in replica_ids
-                }
-                existing_outputs = [path for path in output_paths.values() if os.path.exists(path)]
-                if existing_outputs:
-                    raise FileExistsError(
-                        "Refusing to overwrite recovered replica trajectories: "
-                        + ", ".join(existing_outputs)
-                    )
-
-                partial_paths = {
-                    replica_ix: output_path + ".partial"
-                    for replica_ix, output_path in output_paths.items()
-                }
-                stale_partials = [path for path in partial_paths.values() if os.path.exists(path)]
-                if stale_partials:
-                    raise FileExistsError(
-                        "Remove stale partial replica trajectories before retrying: "
-                        + ", ".join(stale_partials)
-                    )
-
-                source_iterators = {
-                    thermo_ix: iter(md.iterload(
-                        source_dcds[thermo_ix],
-                        top=args.topology,
-                        chunk=chunk_size,
-                        skip=GLOBAL_TRAJ_BURNIN,
-                    ))
-                    for thermo_ix in sorted(referenced_thermos)
-                }
-                output_writers = {}
-                completed = False
-
-                try:
-                    output_writers = {
-                        int(replica_ix): md.formats.DCDTrajectoryFile(
-                            partial_paths[int(replica_ix)],
-                            mode="w",
-                            force_overwrite=False,
-                        )
-                        for replica_ix in replica_ids
-                    }
-
-                    frame_start = 0
-                    while frame_start < n_frames:
-                        source_chunks = {}
-                        exhausted_thermos = []
-                        for thermo_ix, source_iterator in source_iterators.items():
-                            try:
-                                source_chunks[thermo_ix] = next(source_iterator)
-                            except StopIteration:
-                                exhausted_thermos.append(thermo_ix)
-
-                        if exhausted_thermos:
-                            raise ValueError(
-                                f"Trajectory states {exhausted_thermos} ended before mapping frame "
-                                f"{frame_start} for sim_type={sim_type}, seed={seed}."
-                            )
-
-                        chunk_lengths = {chunk.n_frames for chunk in source_chunks.values()}
-                        atom_counts = {chunk.n_atoms for chunk in source_chunks.values()}
-                        if len(chunk_lengths) != 1 or len(atom_counts) != 1:
-                            raise ValueError(
-                                f"Source DCD chunks are incompatible for sim_type={sim_type}, "
-                                f"seed={seed}: frames={sorted(chunk_lengths)}, atoms={sorted(atom_counts)}."
-                            )
-
-                        source_chunk_frames = chunk_lengths.pop()
-                        remaining_mapping_frames = n_frames - frame_start
-                        if source_chunk_frames > remaining_mapping_frames:
-                            raise ValueError(
-                                f"Source DCDs contain more frames than the mapping for "
-                                f"sim_type={sim_type}, seed={seed}."
-                            )
-                        frames_to_write = source_chunk_frames
-                        frame_end = frame_start + frames_to_write
-                        sample_chunk = next(iter(source_chunks.values()))
-                        has_unitcell = sample_chunk.unitcell_lengths is not None
-                        if any(
-                            (chunk.unitcell_lengths is not None) != has_unitcell
-                            or (chunk.unitcell_angles is not None) != has_unitcell
-                            for chunk in source_chunks.values()
-                        ):
-                            raise ValueError(
-                                f"Source DCD unit-cell metadata is inconsistent for "
-                                f"sim_type={sim_type}, seed={seed}."
-                            )
-
-                        for replica_ix, thermo_walk in thermo_walks.items():
-                            states = thermo_walk[frame_start:frame_end]
-                            replica_xyz = np.empty(
-                                (frames_to_write, sample_chunk.n_atoms, 3),
-                                dtype=sample_chunk.xyz.dtype,
-                            )
-                            assigned = np.zeros(frames_to_write, dtype=bool)
-
-                            if has_unitcell:
-                                replica_cell_lengths = np.empty(
-                                    (frames_to_write, 3),
-                                    dtype=sample_chunk.unitcell_lengths.dtype,
-                                )
-                                replica_cell_angles = np.empty(
-                                    (frames_to_write, 3),
-                                    dtype=sample_chunk.unitcell_angles.dtype,
-                                )
-
-                            for thermo_ix, source_chunk in source_chunks.items():
-                                selected = states == thermo_ix
-                                if not selected.any():
-                                    continue
-                                replica_xyz[selected] = source_chunk.xyz[:frames_to_write][selected]
-                                assigned[selected] = True
-                                if has_unitcell:
-                                    replica_cell_lengths[selected] = \
-                                        source_chunk.unitcell_lengths[:frames_to_write][selected]
-                                    replica_cell_angles[selected] = \
-                                        source_chunk.unitcell_angles[:frames_to_write][selected]
-
-                            if not assigned.all():
-                                missing_states = np.unique(states[~assigned]).tolist()
-                                raise ValueError(
-                                    f"No source coordinates for thermo states {missing_states}, "
-                                    f"replica={replica_ix}, frames={frame_start}:{frame_end}."
-                                )
-
-                            if has_unitcell:
-                                output_writers[replica_ix].write(
-                                    replica_xyz,
-                                    cell_lengths=replica_cell_lengths,
-                                    cell_angles=replica_cell_angles,
-                                )
-                            else:
-                                output_writers[replica_ix].write(replica_xyz)
-
-                        frame_start = frame_end
-                        print(
-                            f"Recovered frames {frame_start}/{n_frames} for "
-                            f"sim_type={sim_type}, seed={seed}.",
-                            flush=True,
-                        )
-
-                    for thermo_ix, source_iterator in source_iterators.items():
-                        try:
-                            extra_chunk = next(source_iterator)
-                        except StopIteration:
-                            continue
-                        if extra_chunk.n_frames:
-                            raise ValueError(
-                                f"Trajectory state {thermo_ix} has more frames than its mapping "
-                                f"for sim_type={sim_type}, seed={seed}."
-                            )
-
-                    completed = True
-                finally:
-                    for writer in output_writers.values():
-                        writer.close()
-                    for source_iterator in source_iterators.values():
-                        close_iterator = getattr(source_iterator, "close", None)
-                        if close_iterator is not None:
-                            close_iterator()
-                    if not completed:
-                        for partial_path in partial_paths.values():
-                            if os.path.exists(partial_path):
-                                os.remove(partial_path)
-
-                for replica_ix in replica_ids:
-                    replica_ix = int(replica_ix)
-                    os.replace(partial_paths[replica_ix], output_paths[replica_ix])
-                    print(f"Wrote recovered replica trajectory: {output_paths[replica_ix]}")
+            # Write realreplica to dcd file using mdtraj
+            out_dcd_fn = "temp.dcd"
+            traj = md.Trajectory(realreplica, topology=topologyObj)
+            traj.save_dcd(out_dcd_fn)
 
         # -----------------------------------------------------------------------------
         # Read trajectory data from all files by replica
