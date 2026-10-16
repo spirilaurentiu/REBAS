@@ -929,8 +929,7 @@ def main(args):
             
             rexTrajData = REXTrajData(trajFN, topology=args.topology)
             traj_xyz = rexTrajData.get_xyz(selection_string="all", superpose=False)
-            
-            print(f"traj_xyz shape: {traj_xyz.shape}")
+            print(f"trajThermoIndex: {trajThermoIndex}, traj_xyz shape: {traj_xyz.shape}")
             n_trajFrames, n_trajAtoms, n_trajCoords = traj_xyz.shape
             
             topologyObj = rexTrajData.get_traj().topology
@@ -953,11 +952,16 @@ def main(args):
 
                     rexTrajData = REXTrajData(trajFN, topology=args.topology)
                     traj_xyz = rexTrajData.get_xyz(selection_string="all", superpose=False)
+                    print(f"trajThermoIndex: {trajThermoIndex}, traj_xyz shape: {traj_xyz.shape}")
                     
                     for fIx, frame in enumerate(traj_xyz):
 
                         #print(f"fIx: {fIx}")
                         #print(f"replica_thermo_mapping.T[fIx]: {replica_thermo_mapping.T[fIx]}, trajThermoIndex: {trajThermoIndex}")
+                        if fIx >= len(replica_thermo_mapping.T):
+                            print("Mapping too short:", fIx, len(replica_thermo_mapping.T), len(realReplica), trajFN)
+                        if fIx >= len(realReplica):
+                            print("Output replica too short:", fIx, len(replica_thermo_mapping.T), len(realReplica), trajFN)
 
                         if replica_thermo_mapping.T[fIx][1] == trajThermoIndex:
                             realReplica[fIx] = traj_xyz[fIx]
@@ -2005,7 +2009,8 @@ def main(args):
         # Statistics from any observable from trajectories
         if "traj_stats_1D" in args.figures:
             
-            DO_GEOMETRY, DO_PCA = True, False
+            #DO_GEOMETRY, DO_PCA = True, False
+            DO_GEOMETRY, DO_PCA = False, True
 
             if DO_GEOMETRY:
 
@@ -2335,7 +2340,7 @@ def main(args):
                 proj_T300_Type1 = all_projections[proj_T300_Type1_Ix]
                 proj_T300_Type3 = all_projections[proj_T300_Type3_Ix]
 
-                PRINT__, PLOT__ = True, True
+                PRINT__, PLOT__ = True, False
                 if PRINT__:
                     print(f"Explained variance by PC1 and PC2 for trajectory with Type 1, Repeat 0, Thermo 0: {explained_variances[proj_T300_Type1_Ix]}")
                     print(f"Explained variance by PC1 and PC2 for trajectory with Type 3, Repeat 0, Thermo 0: {explained_variances[proj_T300_Type3_Ix]}")
@@ -2359,7 +2364,7 @@ def main(args):
                         s=0.5,
                     )
 
-                PRINT__, PLOT__ = True, True
+                PRINT__, PLOT__ = True, False
                 if PRINT__:
                     pass
                 if PLOT__:

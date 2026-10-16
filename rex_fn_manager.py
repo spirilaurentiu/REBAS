@@ -75,16 +75,24 @@ class REXFNManager:
             self.OUTPUT_DATA = True
 
         elif FN.endswith(".dcd"):
-            pattern = r"([A-Za-z0-9]+)_(\d{7})\.repl(\d+)\.dcd$"
-            match = re.match(pattern, FN)
+            pattern1 = r"([A-Za-z0-9]+)_(\d{7})\.repl(\d+)\.dcd$"
+            pattern2 = r"([A-Za-z0-9]+)_(\d{7})\.rrrr(\d+)\.dcd$"
+            match1 = re.match(pattern1, FN)
+            match2 = re.match(pattern2, FN)
 
-            if not match:
-                raise ValueError(f"Filename '{FN}' does not match expected format'<name_of_the_molecule>_<7-digit-seed>.repl<index>.dcd'")
+            if (not match1) and (not match2):
+                raise ValueError(f"Filename '{FN}' does not match expected format'<name_of_the_molecule>_<7-digit-seed>.repl<index>.dcd' or '<name_of_the_molecule>_<7-digit-seed>.ther<index>.dcd'")
 
             # mIx = 0
             # for match_group in match.groups():
             #     print("match group:", mIx, match_group)
             #     mIx += 1
+
+            match = None
+            if match1:
+                match = match1
+            else:
+                match = match2
 
             molName = match.group(1)
             seed = match.group(2)
