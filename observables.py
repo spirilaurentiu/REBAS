@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Sequence
 
+import sys
 import mdtraj as md
 import numpy as np
 
@@ -457,9 +458,17 @@ class Observables:
         return result.T
 
     @staticmethod
-    def dihedral_a1_a2_a3_a4(traj, a1=4, a2=6, a3=8, a4=14):
+    def dihedral_a1_a2_a3_a4(traj, a1=4, a2=6, a3=8, a4=14, trig="None"):
         """Calculate dihedral angle defined by four atoms across all frames."""
         result = md.compute_dihedrals(traj, [[a1, a2, a3, a4]])
+
+        if trig == "None":
+            pass
+        elif trig == "sin":
+            result = np.sin(result)
+        elif trig == "cos":
+            result = np.cos(result)
+
         return result.T
 
     @staticmethod

@@ -547,14 +547,22 @@ FIGURES_DICT = {
             "firstTemperature" : 300.0,
             "firstDeltaT" : 300.0
         },
+        # "ala1": {
+        #     "obs_funcs" : [Observables.ala_PMF_indicator], #"obs_funcs" : [Observables.dihedral_a1_a2_a3_a4],
+        #     "obs_funcs_args" : [{"a1":4, "a2":6, "a3":8, "a4":14, "a5":16}], #"obs_funcs_args" : [{"a1":4, "a2":6, "a3":8, "a4":14}],
+        #     "obs_names" : [Observables.ala_PMF_indicator.__name__],
+        #     "obs_titles" : ["PMF Indicator"], #"obs_titles" : ["Dihedral Angle (4,6,8,14)"],
+        #     "firstTemperature" : 300.0,
+        #     "firstDeltaT" : 50.0
+        # },
         "ala1": {
-            "obs_funcs" : [Observables.ala_PMF_indicator], #"obs_funcs" : [Observables.dihedral_a1_a2_a3_a4],
-            "obs_funcs_args" : [{"a1":4, "a2":6, "a3":8, "a4":14, "a5":16}], #"obs_funcs_args" : [{"a1":4, "a2":6, "a3":8, "a4":14}],
-            "obs_names" : [Observables.ala_PMF_indicator.__name__],
-            "obs_titles" : ["PMF Indicator"], #"obs_titles" : ["Dihedral Angle (4,6,8,14)"],
+            "obs_funcs" : [Observables.dihedral_a1_a2_a3_a4],
+            "obs_funcs_args" : [{"a1":4, "a2":6, "a3":8, "a4":14, "trig": "sin"}],
+            "obs_names" : [Observables.dihedral_a1_a2_a3_a4.__name__],
+            "obs_titles" : ["Dihedral Angle (4,6,8,14)"],
             "firstTemperature" : 300.0,
             "firstDeltaT" : 50.0
-        },
+        },        
         "trpch": {
             "obs_funcs" : [Observables.distances],
             "obs_funcs_args" : [{"pairs": [[8, 298]]}],
@@ -2056,7 +2064,8 @@ def main(args):
                 for simIx in range(n_trajRepeats):
 
                     # Observables timeseries plots
-                    PRINT__, PLOT__ = True, True
+                    #PRINT__, PLOT__ = True, True
+                    PRINT__, PLOT__ = False, False
                     if PRINT__:
                         print("Unique sim types:", uniq_trajtypes)
                         print("Unique repeats:", uniq_trajRepeats)
@@ -2118,6 +2127,7 @@ def main(args):
                 for simIx in range(n_trajRepeats):
 
                     # Running mean and std plots
+                    #PRINT__, PLOT__ = True, True
                     PRINT__, PLOT__ = False, False
                     if PRINT__:
                         print("running_mean shape:", running_mean_obs.shape)
@@ -2128,22 +2138,22 @@ def main(args):
                             Y=running_mean_obs[:, simIx, replicaIx, obsIx,:],
                             #ylim=ylim,
                             instantiateFigure=True,
-                            title=obs_title2 + " Running Mean",
+                            title=obs_title + " Running Mean",
                             xlabel="Frame",
-                            ylabel=obs_name2 + " Running Mean",
+                            ylabel=obs_name + " Running Mean",
                             labels=[f"Repeat {simIx} Type {uniq_trajtypes[ix]} Thermo {replicaIx}" for ix in range(len(trajObservables))],
                             colors=[colorByType(uniq_trajtypes[ix]) for ix in range(len(trajObservables))],
-                            save_path=f"traj_{obs_name2}_running_mean.png" if args.useAgg else None
+                            save_path=f"traj_{obs_name}_running_mean.png" if args.useAgg else None
                         )
 
                         plot1D(
                             Y=running_std_obs[:, simIx, replicaIx, obsIx,:],
-                            title=obs_title2 + " Running Std",
+                            title=obs_title + " Running Std",
                             xlabel="Frame",
-                            ylabel=obs_name2 + " Running Std",
+                            ylabel=obs_name + " Running Std",
                             labels=[f"Repeat {simIx} Type {uniq_trajtypes[ix]} Thermo {replicaIx}" for ix in range(len(trajObservables))],
                             colors=[colorByType(uniq_trajtypes[ix]) for ix in range(len(trajObservables))],
-                            save_path=f"traj_{obs_name2}_running_std.png" if args.useAgg else None
+                            save_path=f"traj_{obs_name}_running_std.png" if args.useAgg else None
                         )
                 # endregion # Running mean and std print and plot
                 
@@ -2174,9 +2184,10 @@ def main(args):
                 # CUMULATIVE MEAN and STD Print and Plot
                 # =============================================================
                 #region Cumulative mean and std print and plot
-                PRINT__, PLOT__ = False, False
-                #if PLOT__:
-                #    plt.figure()
+                PRINT__, PLOT__ = True, True
+                #PRINT__, PLOT__ = False, False
+                # if PLOT__:
+                #     plt.figure()
                 replicaIx = 0
                 obsIx = 0                
                 for simIx in range(n_trajRepeats):
@@ -2192,24 +2203,24 @@ def main(args):
                             Y=cummean_obs[:, simIx, replicaIx, obsIx,:],
                             ylim=ylim,
                             instantiateFigure=False,
-                            title=obs_title2 + " Cumulative Mean",
+                            title=obs_title + " Cumulative Mean",
                             xlabel="Frame",
-                            ylabel=obs_name2 + " Cumulative Mean",
+                            ylabel=obs_name + " Cumulative Mean",
                             #labels=[f"Repeat {simIx} Type {uniq_types[ix]} Thermo {replicaIx}" for ix in range(len(observables))],
                             colors=[colorByType(uniq_trajtypes[ix]) for ix in range(len(trajObservables))],
-                            save_path=f"traj_{obs_name2}_cum_mean.png" if args.useAgg else None
+                            save_path=f"traj_{obs_name}_cum_mean.png" if args.useAgg else None
                         )
 
                         plt.figure()
                         plot1D(
                             Y=cumstd_obs[:, simIx, replicaIx, obsIx,:],
                             instantiateFigure=False,
-                            title=obs_title2 + " Cumulative Std",
+                            title=obs_title + " Cumulative Std",
                             xlabel="Frame",
-                            ylabel=obs_name2 + " Cumulative Std",
+                            ylabel=obs_name + " Cumulative Std",
                             labels=[f"Repeat {simIx} Type {uniq_trajtypes[ix]} Thermo {replicaIx}" for ix in range(len(trajObservables))],
                             colors=[colorByType(uniq_trajtypes[ix]) for ix in range(len(trajObservables))],
-                            save_path=f"traj_{obs_name2}_cum_std.png" if args.useAgg else None
+                            save_path=f"traj_{obs_name}_cum_std.png" if args.useAgg else None
                         )
                 # endregion # Cumulative mean and std print and plot
 
@@ -2288,6 +2299,8 @@ def main(args):
 
                 # Principal component analysis (PCA) = linear combination of coords with highest variance
                 from sklearn.decomposition import PCA
+
+                GLOBAL_TRAJ_BURNIN = args.trajBurnin
                 frames = slice(GLOBAL_TRAJ_BURNIN, GLOBAL_TRAJ_END)   # or slice(GLOBAL_BURNIN, None)
 
                 #region Get filters if specified
@@ -2340,7 +2353,7 @@ def main(args):
                 proj_T300_Type1 = all_projections[proj_T300_Type1_Ix]
                 proj_T300_Type3 = all_projections[proj_T300_Type3_Ix]
 
-                PRINT__, PLOT__ = True, False
+                PRINT__, PLOT__ = False, True
                 if PRINT__:
                     print(f"Explained variance by PC1 and PC2 for trajectory with Type 1, Repeat 0, Thermo 0: {explained_variances[proj_T300_Type1_Ix]}")
                     print(f"Explained variance by PC1 and PC2 for trajectory with Type 3, Repeat 0, Thermo 0: {explained_variances[proj_T300_Type3_Ix]}")
@@ -2364,7 +2377,7 @@ def main(args):
                         s=0.5,
                     )
 
-                PRINT__, PLOT__ = True, False
+                PRINT__, PLOT__ = False, True
                 if PRINT__:
                     pass
                 if PLOT__:
